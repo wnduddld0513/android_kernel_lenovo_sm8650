@@ -25,6 +25,8 @@ load(":pitti.bzl", "define_pitti")
 load(":sdmsteppeauto.bzl", "define_sdmsteppeauto")
 load(":seraph.bzl", "define_seraph")
 load(":seraph_tuivm.bzl", "define_seraph_tuivm")
+load(":kirby.bzl", "define_kirby")
+load(":lapis.bzl", "define_lapis")
 
 def define_msm_platforms():
     define_top_level_rules()
@@ -53,3 +55,5 @@ def define_msm_platforms():
     define_neo_tuivm()
     define_mdm9607()
     define_neo_le()
+    define_kirby()
+    define_lapis()
