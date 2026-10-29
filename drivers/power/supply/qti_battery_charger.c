@@ -23,6 +23,8 @@
 #include <linux/thermal.h>
 #include <linux/soc/qcom/pmic_glink.h>
 #include <linux/soc/qcom/battery_charger.h>
+#include <linux/of_gpio.h>
+#include "lenovo_charge_sysfs.h"
 #include <linux/soc/qcom/panel_event_notifier.h>
 #include "qti_typec_class.h"
 
@@ -51,6 +53,10 @@
 #define BC_HBOOST_VMAX_CLAMP_NOTIFY	0x79
 #define BC_GENERIC_NOTIFY		0x80
 
+#define BC_BATT_ABNORMAL_NOTIFY		0x90
+#define HQ_POWER_SUPPLY_GET_REQ                     0x0060
+#define HQ_POWER_SUPPLY_SET_REQ                     0x0061
+
 /* Generic definitions */
 #define MAX_STR_LEN			128
 #define BC_WAIT_TIME_MS			1000
@@ -59,6 +65,29 @@
 #define WLS_FW_UPDATE_TIME_MS		1000
 #define WLS_FW_BUF_SIZE			128
 #define DEFAULT_RESTRICT_FCC_UA		1000000
+
+/* WLS TX definitions */
+#ifdef CONFIG_ARCH_LAPIS
+#define BC_WLS_TX_STATUS_GET	0x0062
+#define BC_WLS_TX_STATUS_SET	0x0063
+
+#define LENOVO_QI_UPDATE_NOTIFY 0x0065
+
+#define QI_OPEN_GPIO    479
+
+#define HALL_NEAR  (1)
+#define HALL_FAR   (0)
+
+static const char * const charge_state_string[] = {
+	"Notcharging",            // NOT_CHARGING
+	"Charging",               // CHARGING
+	"Full",                   // CHARGING_FULL
+	"Hot_Notcharging",        // HOT_CHARGING_STOP
+	"Cold_Notcharging",       // COLD_CHARGING_STOP
+	"BatteryOverLow",         // BATTERY_OVER_LOW_DISCHARGING
+	"Unknown",                // UNKNOW_STATUS
+};
+#endif
 
 enum usb_port_id {
 	USB_1_PORT_ID,
@@ -76,6 +105,10 @@ enum psy_type {
 	PSY_TYPE_USB,
 	PSY_TYPE_USB_2,
 	PSY_TYPE_WLS,
+#ifdef CONFIG_ARCH_LAPIS
+	PSY_TYPE_WLS_TX,
+#endif
+	PSY_TYPE_HQ,
 	PSY_TYPE_MAX,
 };
 
@@ -151,6 +184,77 @@ enum wireless_property_id {
 	WLS_ADAP_TYPE,
 	WLS_CONN_TEMP,
 	WLS_PROP_MAX,
+};
+
+#ifdef CONFIG_ARCH_LAPIS
+enum wls_tx_property_id {
+	WLS_TX_OPEN,
+	WLS_TX_STATE,
+	WLS_TX_LEVEL,
+	WLS_TX_ATTACHED,
+	WLS_TX_MAC,
+	WLS_TX_IIN,
+	WLS_TX_MAC_H,
+	WLS_TX_MAC_L,
+	WLS_TX_CMD,
+	WLS_TX_PROP_MAX,
+};
+#endif
+
+enum huaqin_property_id {
+	HQ_POWER_SUPPLY_PROP_CC_ORIENTATION,            /*0 :  1: */
+	HQ_POWER_SUPPLY_PROP_CC_ORIENTATION2,
+	HQ_POWER_SUPPLY_PROP_IC_MAIN_CHARGE,
+	HQ_POWER_SUPPLY_PROP_IC_FG_1,
+	HQ_POWER_SUPPLY_PROP_IC_FG_2,
+	HQ_POWER_SUPPLY_PROP_IC_CP_1,
+	HQ_POWER_SUPPLY_PROP_IC_CP_2,
+	HQ_POWER_SUPPLY_PROP_IC_QI,
+	HQ_POWER_SUPPLY_PROP_IC_PDPHY,
+	HQ_POWER_SUPPLY_PROP_IC_QC,
+	HQ_POWER_SUPPLY_PROP_BATTERY_MANUFACTURER_1,
+	HQ_POWER_SUPPLY_PROP_BATTERY_MANUFACTURER_2,
+	HQ_POWER_SUPPLY_PROP_FG_1_TEMP,
+	HQ_POWER_SUPPLY_PROP_FG_2_TEMP,
+	HQ_POWER_SUPPLY_PROP_FG_1_CURRENT,
+	HQ_POWER_SUPPLY_PROP_FG_2_CURRENT,
+	HQ_POWER_SUPPLY_PROP_FG_1_VOLTAGE,
+	HQ_POWER_SUPPLY_PROP_FG_2_VOLTAGE,
+	HQ_POWER_SUPPLY_PROP_FG_1_PRODUCE_DATE,
+	HQ_POWER_SUPPLY_PROP_FG_2_PRODUCE_DATE,
+	HQ_POWER_SUPPLY_PROP_FG_1_ACTIVATE_DATE,
+	HQ_POWER_SUPPLY_PROP_FG_2_ACTIVATE_DATE,
+	HQ_POWER_SUPPLY_PROP_FG_1_SOH,
+	HQ_POWER_SUPPLY_PROP_FG_2_SOH,
+	HQ_POWER_SUPPLY_PROP_FG_1_CYCLE_COUNT,
+	HQ_POWER_SUPPLY_PROP_FG_2_CYCLE_COUNT,
+	HQ_POWER_SUPPLY_PROP_FG_MONITOR_CMD,
+	HQ_POWER_SUPPLY_PROP_INPUT_SUSPEND,
+	HQ_POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLE,
+	HQ_POWER_SUPPLY_PROP_BATTERY_PROTECTION_SETTING,
+	HQ_POWER_SUPPLY_PROP_BATTERY_PROTECTION_SETTING_EU,
+	HQ_POWER_SUPPLY_PROP_BATTERY_RECHARGE_SETTING,
+	HQ_POWER_SUPPLY_PROP_BATTERY_MAINTENANCE,
+	HQ_POWER_SUPPLY_PROP_BATTERY_MAINTENANCE20,
+	HQ_POWER_SUPPLY_PROP_BATTERY_PRODUCE_DATE,
+	HQ_POWER_SUPPLY_PROP_BATTERY_ACTIVATE_DATE,
+	HQ_POWER_SUPPLY_PROP_BATTERY_SOH,
+	HQ_POWER_SUPPLY_PROP_BATTERY_CV,
+	HQ_POWER_SUPPLY_PROP_BATTERY_CHG_FV,
+	HQ_POWER_SUPPLY_PROP_BATTERY_FAKE_CYCLE_COUNT,
+	HQ_POWER_SUPPLY_PROP_BATTERY_FAKE_SOC,
+	HQ_POWER_SUPPLY_PROP_BATTERY_ABNORMAL_STATE,
+#ifdef CONFIG_ARCH_LAPIS
+	HQ_POWER_SUPPLY_PROP_WLS_TX_CHARGE_STATE,
+	HQ_POWER_SUPPLY_PROP_WLS_TX_LEVEL,
+	HQ_POWER_SUPPLY_PROP_WLS_TX_ATTACHED,
+	HQ_POWER_SUPPLY_PROP_WLS_TX_MAC,
+	HQ_POWER_SUPPLY_PROP_WLS_TX_TX_IIN,
+	HQ_POWER_SUPPLY_PROP_WLS_TX_MAC_H,
+	HQ_POWER_SUPPLY_PROP_WLS_TX_MAC_L,
+	HQ_POWER_SUPPLY_PROP_WLS_TX_CMD,
+#endif
+	HQ_POWER_SUPPLY_PROPERTIES_MAX
 };
 
 enum {
@@ -251,6 +355,17 @@ struct psy_state {
 	u32			opcode_set;
 };
 
+struct lenovo_qi_devices {
+	bool			wls_fw_update_reqd;
+	u32				wls_fw_version;
+	u16				wls_fw_crc;
+	u32				wls_fw_update_time_ms;
+	u32				wls_hall_status;
+	bool			force_report;
+	char 			mac[6];
+	char 			cmd[1];
+};
+
 struct battery_chg_dev {
 	struct device			*dev;
 	struct class			battery_class;
@@ -275,21 +390,24 @@ struct battery_chg_dev {
 	struct work_struct		subsys_up_work;
 	struct work_struct		usb_type_work;
 	struct work_struct		battery_check_work;
+	struct wakeup_source		*charge_wakelock;
+#ifdef CONFIG_ARCH_LAPIS
+	struct work_struct		qi_uevent_report_work;
+	struct work_struct		qi_update_status;
+#endif
 	int				fake_soc;
 	bool				block_tx;
 	bool				ship_mode_en;
 	bool				debug_battery_detected;
 	bool				wls_not_supported;
-	bool				wls_fw_update_reqd;
-	u32				wls_fw_version;
-	u16				wls_fw_crc;
-	u32				wls_fw_update_time_ms;
+	struct lenovo_qi_devices	qi_dev;
 	struct notifier_block		reboot_notifier;
 	u32				thermal_fcc_ua;
 	u32				restrict_fcc_ua;
 	u32				last_fcc_ua;
 	u32				usb_icl_ua[NUM_USB_PORTS];
 	u32				thermal_fcc_step;
+	bool				disable_thermal;
 	u32				connector_type;
 	u32				usb_prev_mode;
 	bool				restrict_chg_en;
@@ -303,7 +421,20 @@ struct battery_chg_dev {
 	bool				error_prop;
 	bool				micro_usb;
 	u32				num_usb_ports;
+	#ifdef FACTORY_VERSION_MODE
+	bool				is_input_suspend;
+	#endif
+/* Lapis code for JLAPIS-1032 by zhoujj21 at 2024/06/14 start */
+#ifdef CONFIG_ARCH_KIRBY
+	struct delayed_work	usb_burn_monitor_work;
+	struct thermal_zone_device *usb2_therm;
+	bool 	battery_abnormal;
+	int		fake_abnormal_level;
+#endif
+/* Lapis code for JLAPIS-1032 by zhoujj21 at 2024/06/14 end */
 };
+
+static struct battery_chg_dev *gbcdev;
 
 static const int battery_prop_map[BATT_PROP_MAX] = {
 	[BATT_STATUS]		= POWER_SUPPLY_PROP_STATUS,
@@ -361,6 +492,24 @@ static const unsigned int bcdev_usb_extcon_cable[] = {
 	EXTCON_NONE,
 };
 
+#ifdef CONFIG_ARCH_LAPIS
+static const int wls_tx_prop_map[WLS_TX_PROP_MAX] = {
+	[WLS_TX_OPEN]		= POWER_SUPPLY_PROP_WLS_TX_OPEN,
+	[WLS_TX_STATE]		= POWER_SUPPLY_PROP_WLS_TX_CHARGE_STATE,
+	[WLS_TX_LEVEL]		= POWER_SUPPLY_PROP_WLS_TX_LEVEL,
+	[WLS_TX_ATTACHED]	= POWER_SUPPLY_PROP_WLS_TX_ATTACHED,
+	[WLS_TX_MAC]		= POWER_SUPPLY_PROP_WLS_TX_MAC,
+	[WLS_TX_IIN]		= POWER_SUPPLY_PROP_WLS_TX_TX_IIN,
+	[WLS_TX_MAC_H]		= POWER_SUPPLY_PROP_WLS_TX_MAC_H,
+	[WLS_TX_MAC_L]		= POWER_SUPPLY_PROP_WLS_TX_MAC_L,
+	[WLS_TX_CMD]		= POWER_SUPPLY_PROP_WLS_TX_CMD,
+
+};
+#endif
+
+static const int hq_prop_map[HQ_POWER_SUPPLY_PROPERTIES_MAX] = {
+};
+
 /* Standard usb_type definitions similar to power_supply_sysfs.c */
 static const char * const power_supply_usb_type_text[] = {
 	"Unknown", "SDP", "DCP", "CDP", "ACA", "C",
@@ -390,6 +539,27 @@ int unregister_hboost_event_notifier(struct notifier_block *nb)
 	return raw_notifier_chain_unregister(&hboost_notifier, nb);
 }
 EXPORT_SYMBOL(unregister_hboost_event_notifier);
+
+static bool is_offmode(void)
+{
+	static struct device_node *np = NULL;
+	const char *bootparams;
+	static bool offmode = 0;
+
+	if(np != NULL) {
+		return offmode;
+	}
+
+	np = of_find_node_by_path("/chosen");
+	of_property_read_string(np, "bootargs", &bootparams);
+	if (!bootparams)
+		pr_err("%s: failed to get bootargs property\n", __func__);
+	else if (strstr(bootparams, "offmode.charge=1")) {
+		offmode = true;
+	}
+
+	return offmode;
+}
 
 static int battery_chg_fw_write(struct battery_chg_dev *bcdev, void *data,
 				int len)
@@ -722,6 +892,25 @@ static void handle_message(struct battery_chg_dev *bcdev, void *data,
 		}
 
 		break;
+	case HQ_POWER_SUPPLY_GET_REQ:
+		pst = &bcdev->psy_list[PSY_TYPE_HQ];
+		if (validate_message(bcdev, resp_msg, len) &&
+			resp_msg->property_id < pst->prop_count) {
+			pst->prop[resp_msg->property_id] = resp_msg->value;
+			ack_set = true;
+		}
+		break;
+
+#ifdef CONFIG_ARCH_LAPIS
+	case BC_WLS_TX_STATUS_SET:
+		pst = &bcdev->psy_list[PSY_TYPE_WLS_TX];
+		if (validate_message(bcdev, resp_msg, len) &&
+			resp_msg->property_id < pst->prop_count) {
+			pst->prop[resp_msg->property_id] = resp_msg->value;
+			ack_set = true;
+		}
+		break;
+#endif
 	case BC_USB_STATUS_SET(USB_2_PORT_ID):
 		if (bcdev->num_usb_ports < 2) {
 			pr_debug("opcode: %u for missing USB_2 port\n",
@@ -732,6 +921,7 @@ static void handle_message(struct battery_chg_dev *bcdev, void *data,
 	case BC_BATTERY_STATUS_SET:
 	case BC_USB_STATUS_SET(USB_1_PORT_ID):
 	case BC_WLS_STATUS_SET:
+	case HQ_POWER_SUPPLY_SET_REQ:
 		if (validate_message(bcdev, data, len))
 			ack_set = true;
 
@@ -748,7 +938,7 @@ static void handle_message(struct battery_chg_dev *bcdev, void *data,
 		if (len == sizeof(*fw_check_msg)) {
 			fw_check_msg = data;
 			if (fw_check_msg->ret_code == 1)
-				bcdev->wls_fw_update_reqd = true;
+				bcdev->qi_dev.wls_fw_update_reqd = true;
 			ack_set = true;
 		} else {
 			pr_err("Incorrect response length %zu for wls_fw_check_update\n",
@@ -781,7 +971,7 @@ static void handle_message(struct battery_chg_dev *bcdev, void *data,
 	case BC_WLS_FW_GET_VERSION:
 		if (len == sizeof(*fw_ver_msg)) {
 			fw_ver_msg = data;
-			bcdev->wls_fw_version = fw_ver_msg->fw_version;
+			bcdev->qi_dev.wls_fw_version = fw_ver_msg->fw_version;
 			ack_set = true;
 		} else {
 			pr_err("Incorrect response length %zu for wls_fw_get_version\n",
@@ -863,6 +1053,7 @@ static void battery_chg_update_uusb_type(struct battery_chg_dev *bcdev,
 }
 
 static struct power_supply_desc usb_psy_desc[NUM_USB_PORTS];
+static struct power_supply_desc wls_psy_desc;
 
 static void battery_chg_update_usb_type_work(struct work_struct *work)
 {
@@ -870,7 +1061,22 @@ static void battery_chg_update_usb_type_work(struct work_struct *work)
 					struct battery_chg_dev, usb_type_work);
 	struct power_supply_desc *desc;
 	struct psy_state *pst;
+	struct psy_state *pst_wls = &bcdev->psy_list[PSY_TYPE_WLS];
+	struct psy_state *pst_battery = &bcdev->psy_list[PSY_TYPE_BATTERY];
+	bool hold_wakelock = false;
 	int rc, i;
+
+	rc = read_property_id(bcdev, pst_battery, BATT_STATUS);
+	if (rc < 0) {
+		pr_err("Failed to read BATT_STATUS, rc=%d\n", rc);
+		return;
+	}
+
+	rc = read_property_id(bcdev, pst_wls, WLS_ADAP_TYPE);
+	if (rc < 0) {
+		pr_err("Failed to read WLS_ADAP_TYPE rc=%d\n", rc);
+		return;
+	}
 
 	for (i = 0; i < NUM_USB_PORTS; i++) {
 		if (!bcdev->usb_active[i])
@@ -936,6 +1142,54 @@ static void battery_chg_update_usb_type_work(struct work_struct *work)
 		}
 	}
 
+	switch (pst_wls->prop[WLS_ADAP_TYPE]) {
+	case POWER_SUPPLY_USB_TYPE_SDP:
+		wls_psy_desc.type = POWER_SUPPLY_TYPE_USB;
+		break;
+	case POWER_SUPPLY_USB_TYPE_DCP:
+	case POWER_SUPPLY_USB_TYPE_APPLE_BRICK_ID:
+	case QTI_POWER_SUPPLY_USB_TYPE_HVDCP:
+	case QTI_POWER_SUPPLY_USB_TYPE_HVDCP_3:
+	case QTI_POWER_SUPPLY_USB_TYPE_HVDCP_3P5:
+		wls_psy_desc.type = POWER_SUPPLY_TYPE_USB_DCP;
+		break;
+	case POWER_SUPPLY_USB_TYPE_CDP:
+		wls_psy_desc.type = POWER_SUPPLY_TYPE_USB_CDP;
+		break;
+	case POWER_SUPPLY_USB_TYPE_ACA:
+		wls_psy_desc.type = POWER_SUPPLY_TYPE_USB_ACA;
+		break;
+	case POWER_SUPPLY_USB_TYPE_C:
+		wls_psy_desc.type = POWER_SUPPLY_TYPE_USB_TYPE_C;
+		break;
+	case POWER_SUPPLY_USB_TYPE_PD:
+	case POWER_SUPPLY_USB_TYPE_PD_DRP:
+	case POWER_SUPPLY_USB_TYPE_PD_PPS:
+		wls_psy_desc.type = POWER_SUPPLY_TYPE_USB_PD;
+		break;
+	default:
+		wls_psy_desc.type = POWER_SUPPLY_TYPE_USB;
+		break;
+	}
+
+	for (i = 0; i < bcdev->num_usb_ports; i++) {
+		pst = &bcdev->psy_list[i ? PSY_TYPE_USB_2 : PSY_TYPE_USB];
+		if (pst->prop[USB_ADAP_TYPE] != POWER_SUPPLY_USB_TYPE_UNKNOWN)
+			hold_wakelock = true;
+	}
+	if (pst_wls->prop[WLS_ADAP_TYPE] != POWER_SUPPLY_USB_TYPE_UNKNOWN)
+		hold_wakelock = true;
+
+	if (hold_wakelock && pst_battery->prop[BATT_STATUS] != POWER_SUPPLY_STATUS_FULL) {
+		pr_debug("wls_adap_type: %u, status: %d, hold wakelock\n",
+			pst_wls->prop[WLS_ADAP_TYPE], pst_battery->prop[BATT_STATUS]);
+		__pm_stay_awake(bcdev->charge_wakelock);
+	} else {
+		pr_debug("wls_adap_type: %u, status: %d, release wakelock\n",
+			pst_wls->prop[WLS_ADAP_TYPE], pst_battery->prop[BATT_STATUS]);
+		__pm_relax(bcdev->charge_wakelock);
+	}
+
 	if (bcdev->micro_usb)
 		battery_chg_update_uusb_type(bcdev, pst->prop[USB_ADAP_TYPE]);
 }
@@ -947,6 +1201,33 @@ static void battery_chg_check_status_work(struct work_struct *work)
 					battery_check_work);
 	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_BATTERY];
 	int rc;
+
+#ifdef CONFIG_ARCH_KIRBY
+	int level = 0;
+	struct psy_state *pst_hq = &bcdev->psy_list[PSY_TYPE_HQ];
+	char *batt_envp[4][2] = {
+		{"BATTERY_STATE=LENOVO_CHARGE_EVENT_0",	NULL}, 	//battery good
+		{"BATTERY_STATE=LENOVO_CHARGE_EVENT_1",	NULL}, 	//battery failure or missing
+		{"BATTERY_STATE=LENOVO_CHARGE_EVENT_2",	NULL},	//dual battery are not same supplier
+		{"BATTERY_STATE=LENOVO_CHARGE_EVENT_3",	NULL},	//dual battery time diff one year
+	};
+
+	if (bcdev->battery_abnormal) {
+		rc = read_property_id(bcdev, pst_hq, HQ_POWER_SUPPLY_PROP_BATTERY_ABNORMAL_STATE);
+		if (rc < 0) {
+			pr_err("Failed to read BATTERY_ABNORMAL_STATE, rc=%d\n", rc);
+			return;
+		}
+
+		if (bcdev->fake_abnormal_level >=0 && bcdev->fake_abnormal_level <= 3)
+			level = bcdev->fake_abnormal_level;
+		else
+			level = pst_hq->prop[HQ_POWER_SUPPLY_PROP_BATTERY_ABNORMAL_STATE];
+
+		kobject_uevent_env(&bcdev->dev->kobj,KOBJ_CHANGE, batt_envp[level]);
+		bcdev->battery_abnormal = false;
+	}
+#endif
 
 	rc = read_property_id(bcdev, pst, BATT_STATUS);
 	if (rc < 0) {
@@ -1018,6 +1299,7 @@ static void handle_notification(struct battery_chg_dev *bcdev, void *data,
 	switch (notification) {
 	case BC_BATTERY_STATUS_GET:
 	case BC_GENERIC_NOTIFY:
+		schedule_work(&bcdev->usb_type_work);
 		pst = &bcdev->psy_list[PSY_TYPE_BATTERY];
 		if (bcdev->shutdown_volt_mv > 0)
 			schedule_work(&bcdev->battery_check_work);
@@ -1039,7 +1321,26 @@ static void handle_notification(struct battery_chg_dev *bcdev, void *data,
 		break;
 	case BC_WLS_STATUS_GET:
 		pst = &bcdev->psy_list[PSY_TYPE_WLS];
+		schedule_work(&bcdev->usb_type_work);
 		break;
+	case HQ_POWER_SUPPLY_GET_REQ:
+		pst = &bcdev->psy_list[PSY_TYPE_HQ];
+		break;
+#ifdef CONFIG_ARCH_LAPIS
+	case BC_WLS_TX_STATUS_GET:
+		pst = &bcdev->psy_list[PSY_TYPE_WLS_TX];
+		break;
+	case LENOVO_QI_UPDATE_NOTIFY:
+		if (gbcdev != NULL)
+			schedule_work(&gbcdev->qi_uevent_report_work);
+		break;
+#endif
+#ifdef CONFIG_ARCH_KIRBY
+	case BC_BATT_ABNORMAL_NOTIFY:
+		bcdev->battery_abnormal = true;
+		schedule_work(&bcdev->battery_check_work);
+		break;
+#endif
 	default:
 		break;
 	}
@@ -1129,9 +1430,9 @@ static enum power_supply_property wls_props[] = {
 	POWER_SUPPLY_PROP_TEMP,
 };
 
-static const struct power_supply_desc wls_psy_desc = {
+static struct power_supply_desc wls_psy_desc = {
 	.name			= "wireless",
-	.type			= POWER_SUPPLY_TYPE_WIRELESS,
+	.type			= POWER_SUPPLY_TYPE_USB,
 	.properties		= wls_props,
 	.num_properties		= ARRAY_SIZE(wls_props),
 	.get_property		= wls_psy_get_prop,
@@ -1146,6 +1447,50 @@ static const char *get_wls_type_name(u32 wls_type)
 
 	return qc_power_supply_wls_type_text[wls_type];
 }
+
+#ifdef CONFIG_ARCH_LAPIS
+static int wls_tx_psy_get_prop(struct power_supply *psy,
+		enum power_supply_property prop,
+		union power_supply_propval *pval)
+{
+	struct battery_chg_dev *bcdev = power_supply_get_drvdata(psy);
+
+	if (IS_ERR_OR_NULL(bcdev)) {
+		pr_err("wls_tx_psy_get_prop: Failed to get bcdev\n");
+		return -1;
+	}
+	pval->intval = bcdev->qi_dev.wls_hall_status;
+
+	return 0;
+}
+
+static int wls_tx_psy_set_prop(struct power_supply *psy,
+		enum power_supply_property prop,
+		const union power_supply_propval *pval)
+{
+	return 0;
+}
+
+static int wls_tx_psy_prop_is_writeable(struct power_supply *psy,
+		enum power_supply_property prop)
+{
+	return 0;
+}
+
+static enum power_supply_property wls_tx_props[] = {
+	POWER_SUPPLY_PROP_ONLINE,
+};
+
+static const struct power_supply_desc wls_tx_psy_desc = {
+	.name			= "wls_tx",
+	.type			= POWER_SUPPLY_TYPE_WIRELESS,
+	.properties		= wls_tx_props,
+	.num_properties		= ARRAY_SIZE(wls_tx_props),
+	.get_property		= wls_tx_psy_get_prop,
+	.set_property		= wls_tx_psy_set_prop,
+	.property_is_writeable	= wls_tx_psy_prop_is_writeable,
+};
+#endif
 
 static const char *get_usb_type_name(u32 usb_type)
 {
@@ -1373,7 +1718,7 @@ static int battery_psy_set_charge_threshold(struct battery_chg_dev *bcdev,
 	msg.hdr.owner = MSG_OWNER_BC;
 	msg.hdr.type = MSG_TYPE_REQ_RESP;
 	msg.hdr.opcode = BC_CHG_CTRL_LIMIT_EN;
-	msg.enable = 1;
+	msg.enable = 0;  // disable qcom charge limit
 	msg.target_soc = target_soc;
 	msg.delta_soc = delta_soc;
 
@@ -1494,6 +1839,15 @@ static int battery_psy_set_charge_current(struct battery_chg_dev *bcdev,
 		return -EINVAL;
 	}
 
+	if (val == -1) {
+		bcdev->disable_thermal = true;
+	} else if (val == -2) {
+		bcdev->disable_thermal = false;
+	}
+
+	if (bcdev->disable_thermal)
+		val = 1;
+
 	if (val < 0 || val > bcdev->num_thermal_levels)
 		return -EINVAL;
 
@@ -1514,6 +1868,22 @@ static int battery_psy_set_charge_current(struct battery_chg_dev *bcdev,
 
 	return rc;
 }
+
+#ifdef FACTORY_VERSION_MODE
+static void hq_chg_capacity_contrl(struct battery_chg_dev *bcdev, int capacity)
+{
+	if (capacity >= 80 && !bcdev->is_input_suspend) {
+		bcdev->is_input_suspend = true;
+		write_property_id(gbcdev, &gbcdev->psy_list[PSY_TYPE_HQ],
+				HQ_POWER_SUPPLY_PROP_INPUT_SUSPEND, 1);
+		pr_info("capacity = %d, bcdev->is_input_suspend = %d\n", capacity, bcdev->is_input_suspend);
+        } else if (capacity <= 70 && bcdev->is_input_suspend){
+                bcdev->is_input_suspend = false;
+                write_property_id(gbcdev, &gbcdev->psy_list[PSY_TYPE_HQ],
+				HQ_POWER_SUPPLY_PROP_INPUT_SUSPEND, 0);
+       }
+}
+#endif
 
 static int battery_psy_get_prop(struct power_supply *psy,
 		enum power_supply_property prop,
@@ -1549,6 +1919,9 @@ static int battery_psy_get_prop(struct power_supply *psy,
 		if (IS_ENABLED(CONFIG_QTI_PMIC_GLINK_CLIENT_DEBUG) &&
 		   (bcdev->fake_soc >= 0 && bcdev->fake_soc <= 100))
 			pval->intval = bcdev->fake_soc;
+		#ifdef FACTORY_VERSION_MODE
+		hq_chg_capacity_contrl(bcdev, pval->intval);
+		#endif
 		break;
 	case POWER_SUPPLY_PROP_TEMP:
 		pval->intval = DIV_ROUND_CLOSEST((int)pst->prop[prop_id], 10);
@@ -1575,7 +1948,7 @@ static int battery_psy_set_prop(struct power_supply *psy,
 
 	switch (prop) {
 	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT:
-		return battery_psy_set_charge_current(bcdev, pval->intval);
+		return is_offmode()?0:battery_psy_set_charge_current(bcdev, pval->intval);
 	case POWER_SUPPLY_PROP_CHARGE_CONTROL_START_THRESHOLD:
 		return battery_psy_set_charge_start_threshold(bcdev,
 								pval->intval);
@@ -1717,6 +2090,17 @@ static int battery_chg_init_psy(struct battery_chg_dev *bcdev)
 		return rc;
 	}
 
+#ifdef CONFIG_ARCH_LAPIS
+	bcdev->psy_list[PSY_TYPE_WLS_TX].psy =
+		devm_power_supply_register(bcdev->dev, &wls_tx_psy_desc, &psy_cfg);
+	if (IS_ERR(bcdev->psy_list[PSY_TYPE_WLS_TX].psy)) {
+		rc = PTR_ERR(bcdev->psy_list[PSY_TYPE_WLS_TX].psy);
+		bcdev->psy_list[PSY_TYPE_WLS_TX].psy = NULL;
+		pr_err("Failed to register wls tx power supply, rc=%d\n", rc);
+		return rc;
+	}
+#endif
+
 	return 0;
 }
 
@@ -1813,14 +2197,14 @@ static int wireless_fw_check_for_update(struct battery_chg_dev *bcdev,
 {
 	struct wireless_fw_check_req req_msg = {};
 
-	bcdev->wls_fw_update_reqd = false;
+	bcdev->qi_dev.wls_fw_update_reqd = false;
 
 	req_msg.hdr.owner = MSG_OWNER_BC;
 	req_msg.hdr.type = MSG_TYPE_REQ_RESP;
 	req_msg.hdr.opcode = BC_WLS_FW_CHECK_UPDATE;
 	req_msg.fw_version = version;
 	req_msg.fw_size = size;
-	req_msg.fw_crc = bcdev->wls_fw_crc;
+	req_msg.fw_crc = bcdev->qi_dev.wls_fw_crc;
 
 	return battery_chg_write(bcdev, &req_msg, sizeof(req_msg));
 }
@@ -1911,7 +2295,7 @@ static int wireless_fw_update(struct battery_chg_dev *bcdev, bool force)
 		goto release_fw;
 	}
 
-	if (!bcdev->wls_fw_update_reqd) {
+	if (!bcdev->qi_dev.wls_fw_update_reqd) {
 		pr_warn("Wireless FW update not required\n");
 		goto release_fw;
 	}
@@ -1928,21 +2312,21 @@ static int wireless_fw_update(struct battery_chg_dev *bcdev, bool force)
 
 	pr_debug("Waiting for fw_update_ack\n");
 	rc = wait_for_completion_timeout(&bcdev->fw_update_ack,
-				msecs_to_jiffies(bcdev->wls_fw_update_time_ms));
+				msecs_to_jiffies(bcdev->qi_dev.wls_fw_update_time_ms));
 	if (!rc) {
 		pr_err("Error, timed out updating firmware\n");
 		rc = -ETIMEDOUT;
 		goto release_fw;
 	} else {
 		pr_debug("Waited for %d ms\n",
-			bcdev->wls_fw_update_time_ms - jiffies_to_msecs(rc));
+			bcdev->qi_dev.wls_fw_update_time_ms - jiffies_to_msecs(rc));
 		rc = 0;
 	}
 
 	pr_info("Wireless FW update done\n");
 
 release_fw:
-	bcdev->wls_fw_crc = 0;
+	bcdev->qi_dev.wls_fw_crc = 0;
 	release_firmware(fw);
 out:
 	pm_relax(bcdev->dev);
@@ -2021,13 +2405,21 @@ static ssize_t wireless_fw_update_time_ms_store(struct class *c,
 	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
 						battery_class);
 
-	if (kstrtou32(buf, 0, &bcdev->wls_fw_update_time_ms))
+	if (kstrtou32(buf, 0, &bcdev->qi_dev.wls_fw_update_time_ms))
 		return -EINVAL;
 
 	return count;
 }
 
-QTI_CHARGER_RW_PROP_SHOW(wireless_fw_update_time_ms, wls_fw_update_time_ms);
+static ssize_t wireless_fw_update_time_ms_show(struct class *c,
+				struct class_attribute *attr, char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+
+	return scnprintf(buf, PAGE_SIZE, "%u\n", bcdev->qi_dev.wls_fw_update_time_ms);
+}
+static CLASS_ATTR_RW(wireless_fw_update_time_ms);
 
 static ssize_t wireless_fw_crc_store(struct class *c,
 					struct class_attribute *attr,
@@ -2040,7 +2432,7 @@ static ssize_t wireless_fw_crc_store(struct class *c,
 	if (kstrtou16(buf, 0, &val) || !val)
 		return -EINVAL;
 
-	bcdev->wls_fw_crc = val;
+	bcdev->qi_dev.wls_fw_crc = val;
 
 	return count;
 }
@@ -2065,7 +2457,7 @@ static ssize_t wireless_fw_version_show(struct class *c,
 		return rc;
 	}
 
-	return scnprintf(buf, PAGE_SIZE, "%#x\n", bcdev->wls_fw_version);
+	return scnprintf(buf, PAGE_SIZE, "%#x\n", bcdev->qi_dev.wls_fw_version);
 }
 static CLASS_ATTR_RO(wireless_fw_version);
 
@@ -2151,6 +2543,7 @@ static ssize_t charge_control_en_show(struct class *c,
 
 	return scnprintf(buf, PAGE_SIZE, "%d\n", bcdev->chg_ctrl_en);
 }
+
 static CLASS_ATTR_RW(charge_control_en);
 
 QTI_CHARGER_RO_SHOW(usb_typec_compliant, PSY_TYPE_USB, USB_TYPEC_COMPLIANT);
@@ -2158,6 +2551,23 @@ QTI_CHARGER_RO_SHOW(usb_typec_compliant, PSY_TYPE_USB, USB_TYPEC_COMPLIANT);
 QTI_CHARGER_RO_SHOW(usb_num_ports, PSY_TYPE_USB, USB_NUM_PORTS);
 
 QTI_CHARGER_TYPE_RO_SHOW(usb_real_type, usb, PSY_TYPE_USB, USB_REAL_TYPE);
+
+static ssize_t real_type_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct psy_state *pst = &gbcdev->psy_list[PSY_TYPE_USB];
+	int rc;
+
+	rc = read_property_id(gbcdev, pst, USB_REAL_TYPE);
+	if (rc < 0)
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%s\n",
+			get_usb_type_name(pst->prop[USB_REAL_TYPE]));
+}
+
+static struct device_attribute real_type_attr =
+	__ATTR(real_type, 0644, real_type_show, NULL);
 
 QTI_CHARGER_RO_SHOW(usb_2_typec_compliant, PSY_TYPE_USB_2, USB_TYPEC_COMPLIANT);
 
@@ -2320,6 +2730,636 @@ static ssize_t ship_mode_en_show(struct class *c, struct class_attribute *attr,
 }
 static CLASS_ATTR_RW(ship_mode_en);
 
+static ssize_t typec_cc_orientation_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_CC_ORIENTATION);
+	if (rc < 0)
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_CC_ORIENTATION]);
+}
+static CLASS_ATTR_RO(typec_cc_orientation);
+
+static ssize_t typec_cc_orientation2_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_CC_ORIENTATION2);
+	if (rc < 0)
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_CC_ORIENTATION2]);
+}
+static CLASS_ATTR_RO(typec_cc_orientation2);
+static ssize_t chip_main_charge_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_IC_MAIN_CHARGE);
+	if (rc < 0)
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_IC_MAIN_CHARGE]);
+}
+static CLASS_ATTR_RO(chip_main_charge);
+
+static ssize_t chip_fg1_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_IC_FG_1);
+	if (rc < 0)
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_IC_FG_1]);
+}
+static CLASS_ATTR_RO(chip_fg1);
+
+static ssize_t chip_fg2_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_IC_FG_2);
+	if (rc < 0)
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_IC_FG_2]);
+}
+static CLASS_ATTR_RO(chip_fg2);
+
+static ssize_t chip_cp1_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_IC_CP_1);
+	if (rc < 0)
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_IC_CP_1]);
+}
+static CLASS_ATTR_RO(chip_cp1);
+
+static ssize_t chip_cp2_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_IC_CP_2);
+	if (rc < 0)
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_IC_CP_2]);
+}
+static CLASS_ATTR_RO(chip_cp2);
+
+static ssize_t chip_qi_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_IC_QI);
+	if (rc < 0)
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_IC_QI]);
+}
+static CLASS_ATTR_RO(chip_qi);
+
+static ssize_t chip_pdphy_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_IC_PDPHY);
+	if (rc < 0)
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_IC_PDPHY]);
+}
+static CLASS_ATTR_RO(chip_pdphy);
+
+
+static ssize_t chip_qc_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_IC_QC);
+	if (rc < 0)
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_IC_QC]);
+}
+static CLASS_ATTR_RO(chip_qc);
+
+static ssize_t battery1_manufacturer_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_MANUFACTURER_1);
+	if (rc < 0)
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_BATTERY_MANUFACTURER_1]);
+}
+static CLASS_ATTR_RO(battery1_manufacturer);
+
+#ifdef CONFIG_ARCH_KIRBY
+static ssize_t battery2_manufacturer_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_MANUFACTURER_2);
+	if (rc < 0)
+
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_BATTERY_MANUFACTURER_2]);
+}
+static CLASS_ATTR_RO(battery2_manufacturer);
+#endif
+
+static ssize_t fg1_temp_store(struct class *c,
+					struct class_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	int rc;
+	int val;
+
+	if (kstrtoint(buf, 0, &val))
+		return -EINVAL;
+
+	rc = write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_HQ],
+				HQ_POWER_SUPPLY_PROP_FG_1_TEMP, val);
+	if (rc < 0)
+		return rc;
+
+	return count;
+}
+
+static ssize_t fg1_temp_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_FG_1_TEMP);
+	if (rc < 0)
+
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_FG_1_TEMP]);
+}
+static CLASS_ATTR_RW(fg1_temp);
+
+#ifdef CONFIG_ARCH_KIRBY
+static ssize_t fg2_temp_store(struct class *c,
+					struct class_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	int rc;
+	int val;
+
+	if (kstrtoint(buf, 0, &val))
+		return -EINVAL;
+
+	rc = write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_HQ],
+				HQ_POWER_SUPPLY_PROP_FG_2_TEMP, val);
+	if (rc < 0)
+		return rc;
+
+	return count;
+}
+
+static ssize_t fg2_temp_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_FG_2_TEMP);
+	if (rc < 0)
+
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_FG_2_TEMP]);
+}
+static CLASS_ATTR_RW(fg2_temp);
+#endif
+
+static ssize_t fg1_current_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_FG_1_CURRENT);
+	if (rc < 0)
+
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_FG_1_CURRENT]);
+}
+static CLASS_ATTR_RO(fg1_current);
+
+#ifdef CONFIG_ARCH_KIRBY
+static ssize_t fg2_current_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_FG_2_CURRENT);
+	if (rc < 0)
+
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_FG_2_CURRENT]);
+}
+static CLASS_ATTR_RO(fg2_current);
+#endif
+
+static ssize_t fg1_voltage_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_FG_1_VOLTAGE);
+	if (rc < 0)
+
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_FG_1_VOLTAGE]);
+}
+static CLASS_ATTR_RO(fg1_voltage);
+
+#ifdef CONFIG_ARCH_KIRBY
+static ssize_t fg2_voltage_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_FG_2_VOLTAGE);
+	if (rc < 0)
+
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_FG_2_VOLTAGE]);
+}
+static CLASS_ATTR_RO(fg2_voltage);
+#endif
+
+/* battery1 produce date */
+static ssize_t fg1_produce_date_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_FG_1_PRODUCE_DATE);
+	if (rc < 0)
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_FG_1_PRODUCE_DATE]);
+}
+static CLASS_ATTR_RO(fg1_produce_date);
+
+/* battery1 activate date */
+static ssize_t fg1_activate_date_store(struct class *c, struct class_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	int rc = 0;
+	int val = 0;
+
+	if (kstrtos32(buf, 10, &val))
+		return -EINVAL;
+
+	rc = write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_HQ],
+				HQ_POWER_SUPPLY_PROP_FG_1_ACTIVATE_DATE, val);
+	if (rc < 0)
+		return rc;
+
+	return count;
+}
+
+static ssize_t fg1_activate_date_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_FG_1_ACTIVATE_DATE);
+	if (rc < 0)
+
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_FG_1_ACTIVATE_DATE]);
+}
+static CLASS_ATTR_RW(fg1_activate_date);
+
+/* battery1 soh date */
+static ssize_t fg1_soh_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_FG_1_SOH);
+	if (rc < 0)
+
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_FG_1_SOH]);
+}
+static CLASS_ATTR_RO(fg1_soh);
+
+/* battery1 cycle count */
+static ssize_t fg1_cycle_count_store(struct class *c, struct class_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+					battery_class);
+	int rc = 0;
+	int val = 0;
+
+	if (kstrtos32(buf, 10, &val))
+		return -EINVAL;
+
+	rc = write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_HQ],
+				HQ_POWER_SUPPLY_PROP_FG_1_CYCLE_COUNT, val);
+	if (rc < 0)
+		return rc;
+
+	return count;
+}
+
+static ssize_t fg1_cycle_count_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_FG_1_CYCLE_COUNT);
+	if (rc < 0)
+
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_FG_1_CYCLE_COUNT]);
+}
+static CLASS_ATTR_RW(fg1_cycle_count);
+
+#ifdef CONFIG_ARCH_KIRBY
+/* battery2 produce date */
+static ssize_t fg2_produce_date_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_FG_2_PRODUCE_DATE);
+	if (rc < 0)
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_FG_2_PRODUCE_DATE]);
+}
+static CLASS_ATTR_RO(fg2_produce_date);
+
+/* battery2 activate date */
+static ssize_t fg2_activate_date_store(struct class *c, struct class_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+					battery_class);
+	int rc = 0;
+	int val = 0;
+
+	if (kstrtos32(buf, 10, &val))
+		return -EINVAL;
+
+	rc = write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_HQ],
+				HQ_POWER_SUPPLY_PROP_FG_2_ACTIVATE_DATE, val);
+	if (rc < 0)
+		return rc;
+
+	return count;
+}
+
+static ssize_t fg2_activate_date_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_FG_2_ACTIVATE_DATE);
+	if (rc < 0)
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_FG_2_ACTIVATE_DATE]);
+}
+static CLASS_ATTR_RW(fg2_activate_date);
+
+/* battery2 soh date */
+static ssize_t fg2_soh_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_FG_2_SOH);
+	if (rc < 0)
+
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_FG_2_SOH]);
+}
+static CLASS_ATTR_RO(fg2_soh);
+
+/* battery2 cycle count */
+static ssize_t fg2_cycle_count_store(struct class *c, struct class_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+					battery_class);
+	int rc = 0;
+	int val = 0;
+
+	if (kstrtos32(buf, 10, &val))
+		return -EINVAL;
+
+	rc = write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_HQ],
+				HQ_POWER_SUPPLY_PROP_FG_2_CYCLE_COUNT, val);
+	if (rc < 0)
+		return rc;
+
+	return count;
+}
+
+static ssize_t fg2_cycle_count_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_FG_2_CYCLE_COUNT);
+	if (rc < 0)
+
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_FG_2_CYCLE_COUNT]);
+}
+static CLASS_ATTR_RW(fg2_cycle_count);
+#endif
+
+static ssize_t fg_monitor_cmd_store(struct class *c, struct class_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+					battery_class);
+	int rc = 0;
+	int val = 0;
+
+	if (kstrtos32(buf, 10, &val))
+		return -EINVAL;
+
+	rc = write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_HQ], HQ_POWER_SUPPLY_PROP_FG_MONITOR_CMD, val);
+	if (rc < 0)
+		return rc;
+
+	return count;
+}
+
+static ssize_t fg_monitor_cmd_show(struct class *c, struct class_attribute *attr,
+				char *buf)
+{
+	struct battery_chg_dev *bcdev = container_of(c, struct battery_chg_dev,
+						battery_class);
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_FG_MONITOR_CMD);
+	if (rc < 0)
+
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_FG_MONITOR_CMD]);
+}
+static CLASS_ATTR_RW(fg_monitor_cmd);
+
+static ssize_t input_suspend_store(struct device *dev, struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	int rc = 0;
+	bool val = 0;
+
+	if (kstrtobool(buf, &val))
+		return -EINVAL;
+
+	rc = write_property_id(gbcdev, &gbcdev->psy_list[PSY_TYPE_HQ],
+				HQ_POWER_SUPPLY_PROP_INPUT_SUSPEND, val);
+	if (rc < 0)
+		return rc;
+
+	return count;
+}
+
+static ssize_t input_suspend_show(struct device *dev, struct device_attribute *attr,
+				char *buf)
+{
+	struct psy_state *pst = &gbcdev->psy_list[PSY_TYPE_HQ];
+	int rc;
+
+	rc = read_property_id(gbcdev, pst, HQ_POWER_SUPPLY_PROP_INPUT_SUSPEND);
+	if (rc < 0)
+		return rc;
+
+	return scnprintf(buf, PAGE_SIZE, "%d\n", pst->prop[HQ_POWER_SUPPLY_PROP_INPUT_SUSPEND]);
+}
+
+static struct device_attribute input_suspend_attr =
+	__ATTR(input_suspend, 0644, input_suspend_show, input_suspend_store);
+
 static struct attribute *battery_class_attrs[] = {
 	&class_attr_soh.attr,
 	&class_attr_resistance.attr,
@@ -2337,8 +3377,37 @@ static struct attribute *battery_class_attrs[] = {
 	&class_attr_restrict_chg.attr,
 	&class_attr_restrict_cur.attr,
 	&class_attr_usb_num_ports.attr,
-	&class_attr_usb_real_type.attr,
+	//&class_attr_real_type.attr,
 	&class_attr_usb_typec_compliant.attr,
+	&class_attr_typec_cc_orientation.attr,
+	&class_attr_typec_cc_orientation2.attr,
+	&class_attr_chip_main_charge.attr,
+	&class_attr_chip_fg1.attr,
+	&class_attr_chip_fg2.attr,
+	&class_attr_chip_cp1.attr,
+	&class_attr_chip_cp2.attr,
+	&class_attr_chip_qi.attr,
+	&class_attr_chip_pdphy.attr,
+	&class_attr_chip_qc.attr,
+	&class_attr_battery1_manufacturer.attr,
+	&class_attr_fg1_temp.attr,
+	&class_attr_fg1_current.attr,
+	&class_attr_fg1_voltage.attr,
+	&class_attr_fg1_produce_date.attr,
+	&class_attr_fg1_activate_date.attr,
+	&class_attr_fg1_soh.attr,
+	&class_attr_fg1_cycle_count.attr,
+	&class_attr_fg_monitor_cmd.attr,
+#ifdef CONFIG_ARCH_KIRBY
+	&class_attr_battery2_manufacturer.attr,
+	&class_attr_fg2_temp.attr,
+	&class_attr_fg2_current.attr,
+	&class_attr_fg2_voltage.attr,
+	&class_attr_fg2_produce_date.attr,
+	&class_attr_fg2_activate_date.attr,
+	&class_attr_fg2_soh.attr,
+	&class_attr_fg2_cycle_count.attr,
+#endif
 	&class_attr_charge_control_en.attr,
 	NULL,
 };
@@ -2661,7 +3730,7 @@ battery_chg_set_cur_charge_cntl_limit(struct thermal_cooling_device *tcd,
 {
 	struct battery_chg_dev *bcdev = tcd->devdata;
 
-	return battery_psy_set_charge_current(bcdev, (int)state);
+	return  is_offmode()?0:battery_psy_set_charge_current(bcdev, (int)state);
 }
 
 static const struct thermal_cooling_device_ops battery_tcd_ops = {
@@ -2724,6 +3793,761 @@ static int register_extcon_conn_type(struct battery_chg_dev *bcdev)
 	return rc;
 }
 
+
+static int lenovo_battery_sysfs_get_property(struct power_supply *psy, enum sysfs_property prop, union power_supply_propval *pval)
+{
+	struct battery_chg_dev *bcdev = psy->drv_data;
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc = 0;
+	pval->intval = 0;
+
+	switch (prop) {
+	case POWER_SUPPLY_PROP_BATTERY_SHIPPING_MODE:
+		pval->intval = bcdev->ship_mode_en;
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLE:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLE);
+		if (rc < 0)
+			return rc;
+		pval->intval = pst->prop[HQ_POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLE];
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_PROTECTION_SETTING:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_PROTECTION_SETTING);
+		if (rc < 0)
+			return rc;
+		pval->intval = pst->prop[HQ_POWER_SUPPLY_PROP_BATTERY_PROTECTION_SETTING];
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_PROTECTION_SETTING_EU:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_PROTECTION_SETTING_EU);
+		if (rc < 0)
+			return rc;
+		pval->intval = pst->prop[HQ_POWER_SUPPLY_PROP_BATTERY_PROTECTION_SETTING_EU];
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_RECHARGE_SETTING:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_RECHARGE_SETTING);
+		if (rc < 0)
+			return rc;
+		pval->intval = pst->prop[HQ_POWER_SUPPLY_PROP_BATTERY_RECHARGE_SETTING];
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_MAINTENANCE:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_MAINTENANCE);
+		if (rc < 0)
+			return rc;
+		pval->intval = pst->prop[HQ_POWER_SUPPLY_PROP_BATTERY_MAINTENANCE];
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_MAINTENANCE20:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_MAINTENANCE20);
+		if (rc < 0)
+			return rc;
+		pval->intval = pst->prop[HQ_POWER_SUPPLY_PROP_BATTERY_MAINTENANCE20];
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_PRODUCE_DATE:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_PRODUCE_DATE);
+		if (rc < 0)
+			return rc;
+		pval->intval = pst->prop[HQ_POWER_SUPPLY_PROP_BATTERY_PRODUCE_DATE];
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_ACTIVATE_DATE:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_ACTIVATE_DATE);
+		if (rc < 0)
+			return rc;
+		pval->intval = pst->prop[HQ_POWER_SUPPLY_PROP_BATTERY_ACTIVATE_DATE];
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_SOH:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_SOH);
+		if (rc < 0)
+			return rc;
+		pval->intval = pst->prop[HQ_POWER_SUPPLY_PROP_BATTERY_SOH];
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_FAKE_CYCLE_COUNT:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_FAKE_CYCLE_COUNT);
+		if (rc < 0)
+			return rc;
+		pval->intval = pst->prop[HQ_POWER_SUPPLY_PROP_BATTERY_FAKE_CYCLE_COUNT];
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_FAKE_SOC:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_FAKE_SOC);
+		if (rc < 0)
+			return rc;
+		pval->intval = pst->prop[HQ_POWER_SUPPLY_PROP_BATTERY_FAKE_SOC];
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_CV:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_CV);
+		if (rc < 0)
+			return rc;
+		pval->intval = pst->prop[HQ_POWER_SUPPLY_PROP_BATTERY_CV];
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_CHG_FV:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_CHG_FV);
+		if (rc < 0)
+			return rc;
+		pval->intval = pst->prop[HQ_POWER_SUPPLY_PROP_BATTERY_CHG_FV];
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_ABNORMAL_STATE:
+	#ifdef CONFIG_ARCH_KIRBY
+		pval->intval = bcdev->fake_abnormal_level;
+	#endif
+		break;
+	default:
+		dev_err(bcdev->dev, ">>>Lenovo battery get error property<<<\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int lenovo_battery_sysfs_set_property(struct power_supply *psy, enum sysfs_property prop, const union power_supply_propval *pval)
+{
+	struct battery_chg_dev *bcdev = psy->drv_data;
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc = 0;
+
+	pr_debug("Lenovo battery set property = %d, value = %d\n", prop, pval->intval);
+
+	switch (prop) {
+	case POWER_SUPPLY_PROP_BATTERY_SHIPPING_MODE:
+		bcdev->ship_mode_en = (bool)!!pval->intval;
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLE:
+		rc = write_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLE, pval->intval);
+		if (rc < 0) {
+			pr_err("Failed to set charging_enable, rc=%d\n", rc);
+			return rc;
+		}
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_PROTECTION_SETTING:
+		rc = write_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_PROTECTION_SETTING, pval->intval);
+		if (rc < 0) {
+			pr_err("Failed to set protection setting, rc=%d\n", rc);
+			return rc;
+		}
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_PROTECTION_SETTING_EU:
+		rc = write_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_PROTECTION_SETTING_EU, pval->intval);
+		if (rc < 0) {
+			pr_err("Failed to set protection setting eu, rc=%d\n", rc);
+			return rc;
+		}
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_RECHARGE_SETTING:
+		rc = write_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_RECHARGE_SETTING, pval->intval);
+		if (rc < 0) {
+			pr_err("Failed to set recharge setting rc=%d\n", rc);
+			return rc;
+		}
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_MAINTENANCE:
+		rc = write_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_MAINTENANCE, pval->intval);
+		if (rc < 0) {
+			pr_err("Failed to set battery maintenance rc=%d\n", rc);
+			return rc;
+		}
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_MAINTENANCE20:
+		rc = write_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_MAINTENANCE20, pval->intval);
+		if (rc < 0) {
+			pr_err("Failed to set battery maintenance20 rc=%d\n", rc);
+			return rc;
+		}
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_ACTIVATE_DATE:
+		rc = write_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_ACTIVATE_DATE, pval->intval);
+		if (rc < 0) {
+			pr_err("Failed to set charging enable, rc=%d\n", rc);
+			return rc;
+		}
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_CV:
+		rc = write_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_CV, pval->intval);
+		if (rc < 0) {
+			pr_err("Failed to set battery cv, rc=%d\n", rc);
+			return rc;
+		}
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_CHG_FV:
+		rc = write_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_CHG_FV, pval->intval);
+		if (rc < 0) {
+			pr_err("Failed to set battery chg FV, rc=%d\n", rc);
+			return rc;
+		}
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_FAKE_CYCLE_COUNT:
+		rc = write_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_FAKE_CYCLE_COUNT, pval->intval);
+		if (rc < 0) {
+			pr_err("Failed to set fake cycle count, rc=%d\n", rc);
+			return rc;
+		}
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_FAKE_SOC:
+		rc = write_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_BATTERY_FAKE_SOC, pval->intval);
+		if (rc < 0) {
+			pr_err("Failed to set fake soc, rc=%d\n", rc);
+			return rc;
+		}
+		break;
+	case POWER_SUPPLY_PROP_BATTERY_ABNORMAL_STATE:
+	#ifdef CONFIG_ARCH_KIRBY
+		bcdev->fake_abnormal_level = pval->intval;
+		bcdev->battery_abnormal = true;
+		schedule_work(&bcdev->battery_check_work);
+	#endif
+		break;
+	default:
+		dev_err(bcdev->dev, ">>>Lenovo battery set error property<<<\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static ssize_t lenovo_battery_sysfs_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct power_supply *psy = NULL;
+	struct sysfs_info *sysfs_attr;
+	union power_supply_propval pval = {0};
+	int val;
+	ssize_t ret;
+
+	ret = kstrtos32(buf, 10, &val);
+	if (ret < 0)
+		return ret;
+
+	pval.intval = val;
+
+	psy = dev_get_drvdata(dev);
+	if (!psy) {
+		dev_info(&psy->dev, "invalid battery psy");
+		return ret;
+	}
+
+	sysfs_attr = container_of(attr, struct sysfs_info, attr);
+	lenovo_battery_sysfs_set_property(psy, sysfs_attr->prop, &pval);
+
+	return count;
+}
+
+static ssize_t lenovo_battery_sysfs_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct power_supply *psy = dev_get_drvdata(dev);
+	struct sysfs_info *sysfs_attr;
+	union power_supply_propval pval = {0};
+	ssize_t count = 0;
+
+	if (!psy) {
+		dev_info(&psy->dev, "invalid battery psy");
+		return count;
+	}
+
+	sysfs_attr = container_of(attr, struct sysfs_info, attr);
+	lenovo_battery_sysfs_get_property(psy, sysfs_attr->prop, &pval);
+
+	if (sysfs_attr->prop == POWER_SUPPLY_PROP_BATTERY_PROTECTION_SETTING ||
+		sysfs_attr->prop == POWER_SUPPLY_PROP_BATTERY_PROTECTION_SETTING_EU) {
+		count = scnprintf(buf, PAGE_SIZE, "%06d\n", pval.intval);
+	} else {
+		count = scnprintf(buf, PAGE_SIZE, "%d\n", pval.intval);
+	}
+
+	return count;
+}
+
+static struct sysfs_info battery_sysfs_field_tbl[] = {
+	BATT_SYSFS_FIELD_RW(charging_enable, POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLE, false),
+	BATT_SYSFS_FIELD_RW(protection_setting, POWER_SUPPLY_PROP_BATTERY_PROTECTION_SETTING, false),
+	BATT_SYSFS_FIELD_RW(protection_setting_eu, POWER_SUPPLY_PROP_BATTERY_PROTECTION_SETTING_EU, false),
+	BATT_SYSFS_FIELD_RW(recharge_setting, POWER_SUPPLY_PROP_BATTERY_RECHARGE_SETTING, false),
+	BATT_SYSFS_FIELD_RW(battery_maintenance, POWER_SUPPLY_PROP_BATTERY_MAINTENANCE, false),
+	BATT_SYSFS_FIELD_RW(battery_maintenance20, POWER_SUPPLY_PROP_BATTERY_MAINTENANCE20, false),
+	BATT_SYSFS_FIELD_RW(shipping_mode, POWER_SUPPLY_PROP_BATTERY_SHIPPING_MODE, false),
+	BATT_SYSFS_FIELD_RO(produce_date, POWER_SUPPLY_PROP_BATTERY_PRODUCE_DATE, false),
+	BATT_SYSFS_FIELD_RW(activate_date, POWER_SUPPLY_PROP_BATTERY_ACTIVATE_DATE, false),
+	BATT_SYSFS_FIELD_RO(soh, POWER_SUPPLY_PROP_BATTERY_SOH, false),
+	//BATT_SYSFS_FIELD_RO(time_to_full_now, POWER_SUPPLY_PROP_BATTERY_TIME_TO_FULL_NOW, false),
+	BATT_SYSFS_FIELD_RO(time_to_empty_now, POWER_SUPPLY_PROP_BATTERY_TIME_TO_EMPTY_NOW, false),
+	BATT_SYSFS_FIELD_RW(cv, POWER_SUPPLY_PROP_BATTERY_CV, false),
+	BATT_SYSFS_FIELD_RW(chg_fv, POWER_SUPPLY_PROP_BATTERY_CHG_FV, false),
+	BATT_SYSFS_FIELD_RW(fake_cycle_count, POWER_SUPPLY_PROP_BATTERY_FAKE_CYCLE_COUNT, false),
+	BATT_SYSFS_FIELD_RW(fake_soc, POWER_SUPPLY_PROP_BATTERY_FAKE_SOC, false),
+#ifdef CONFIG_ARCH_KIRBY
+	BATT_SYSFS_FIELD_RW(fake_abnormal_level, POWER_SUPPLY_PROP_BATTERY_ABNORMAL_STATE, false),
+#endif
+};
+
+static struct attribute
+	*battery_sysfs_attrs[ARRAY_SIZE(battery_sysfs_field_tbl) + 1];
+
+static const struct attribute_group battery_sysfs_attr_group = {
+	.attrs = battery_sysfs_attrs,
+};
+
+int hq_battery_sysfs_create_group(struct battery_chg_dev *bcdev)
+{
+	int i = 0, length = 0, rc = -1;
+
+	if (!(bcdev->psy_list[PSY_TYPE_BATTERY].psy)) {
+		dev_info(bcdev->dev, "Invalid battery psy\n");
+		return rc;
+	}
+
+	length = ARRAY_SIZE(battery_sysfs_field_tbl);
+	for (i = 0; i < length; i++)
+		battery_sysfs_attrs[i] = &battery_sysfs_field_tbl[i].attr.attr;
+
+	battery_sysfs_attrs[length] = NULL;
+	rc = sysfs_create_group(&bcdev->psy_list[PSY_TYPE_BATTERY].psy->dev.kobj, &battery_sysfs_attr_group);
+	if (rc) {
+		dev_info(bcdev->dev, "Failed to create battery_sysfs\n");
+	}
+
+	return rc;
+}
+EXPORT_SYMBOL(hq_battery_sysfs_create_group);
+
+static struct attribute *usb_psy_attrs[] = {
+	&input_suspend_attr.attr,
+	&real_type_attr.attr,
+	NULL,
+};
+
+static const struct attribute_group usb_psy_attrs_group = {
+	.attrs = usb_psy_attrs,
+};
+
+int hq_usb_sysfs_create_group(struct battery_chg_dev *bcdev)
+{
+	return sysfs_create_group(&bcdev->psy_list[PSY_TYPE_USB].psy->dev.kobj,
+								&usb_psy_attrs_group);
+}
+EXPORT_SYMBOL(hq_usb_sysfs_create_group);
+
+#ifdef CONFIG_ARCH_LAPIS
+static int lenovo_qi_sysfs_get_property(struct power_supply *psy, enum sysfs_property prop, union power_supply_propval *pval)
+{
+	struct battery_chg_dev *bcdev = psy->drv_data;
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc = 0;
+
+	switch (prop) {
+	case POWER_SUPPLY_PROP_WLS_TX_OPEN:
+		pval->intval = gpio_get_value(QI_OPEN_GPIO);
+		break;
+	case POWER_SUPPLY_PROP_WLS_TX_CHARGE_STATE:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_WLS_TX_CHARGE_STATE);
+		if (rc < 0){
+				dev_err(bcdev->dev, "Lenovo charge wls_tx get property = %d fail , rc = %d\n", prop, rc);
+				return rc;
+		}
+		pval->intval  = pst->prop[HQ_POWER_SUPPLY_PROP_WLS_TX_CHARGE_STATE];
+		break;
+	case POWER_SUPPLY_PROP_WLS_TX_LEVEL:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_WLS_TX_LEVEL);
+		if (rc < 0){
+				dev_err(bcdev->dev, "Lenovo charge wls_tx get property = %d fail , rc = %d\n", prop, rc);
+				return rc;
+		}
+		pval->intval  = pst->prop[HQ_POWER_SUPPLY_PROP_WLS_TX_LEVEL];
+		break;
+	case POWER_SUPPLY_PROP_WLS_TX_ATTACHED:
+		pval->intval = gpio_get_value(QI_OPEN_GPIO);
+		/*to do*/
+		break;
+	case POWER_SUPPLY_PROP_WLS_TX_MAC:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_WLS_TX_MAC_H);
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_WLS_TX_MAC_L);
+		bcdev->qi_dev.mac[0] = pst->prop[HQ_POWER_SUPPLY_PROP_WLS_TX_MAC_H] & 0xff;
+		bcdev->qi_dev.mac[1] = (pst->prop[HQ_POWER_SUPPLY_PROP_WLS_TX_MAC_H] & 0xff00) >> 8;
+		bcdev->qi_dev.mac[2] = (pst->prop[HQ_POWER_SUPPLY_PROP_WLS_TX_MAC_H] & 0xff0000) >> 16;
+		bcdev->qi_dev.mac[3] = pst->prop[HQ_POWER_SUPPLY_PROP_WLS_TX_MAC_L] & 0xff;
+		bcdev->qi_dev.mac[4] = (pst->prop[HQ_POWER_SUPPLY_PROP_WLS_TX_MAC_L] & 0xff00) >> 8;
+		bcdev->qi_dev.mac[5] = (pst->prop[HQ_POWER_SUPPLY_PROP_WLS_TX_MAC_L] & 0xff0000) >> 16;
+		break;
+	case POWER_SUPPLY_PROP_WLS_TX_TX_IIN:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_WLS_TX_TX_IIN);
+		if (rc < 0){
+				dev_err(bcdev->dev, "Lenovo charge wls_tx get property = %d fail , rc = %d\n", prop, rc);
+				return rc;
+		}
+		pval->intval  = pst->prop[HQ_POWER_SUPPLY_PROP_WLS_TX_TX_IIN];
+		break;
+	case POWER_SUPPLY_PROP_WLS_TX_MAC_H:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_WLS_TX_MAC_H);
+		if (rc < 0){
+				dev_err(bcdev->dev, "Lenovo charge wls_tx get property = %d fail , rc = %d\n", prop, rc);
+				return rc;
+		}
+		pval->intval  = pst->prop[HQ_POWER_SUPPLY_PROP_WLS_TX_MAC_H];
+		break;
+	case POWER_SUPPLY_PROP_WLS_TX_MAC_L:
+		rc = read_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_WLS_TX_MAC_L);
+		if (rc < 0){
+				dev_err(bcdev->dev, "Lenovo charge wls_tx get property = %d fail , rc = %d\n", prop, rc);
+				return rc;
+		}
+		pval->intval  = pst->prop[HQ_POWER_SUPPLY_PROP_WLS_TX_MAC_L];
+		break;
+	default:
+		dev_err(bcdev->dev, ">>>Lenovo Qi get error property<<<\n");
+		return -EINVAL;
+	}
+
+	dev_err(bcdev->dev, "Lenovo Qi get property value = %d\n", pval->intval);
+
+	return 0;
+}
+
+static int lenovo_qi_sysfs_set_property(struct power_supply *psy, enum sysfs_property prop, const union power_supply_propval *pval)
+{
+	struct battery_chg_dev *bcdev = psy->drv_data;
+	struct psy_state *pst = &bcdev->psy_list[PSY_TYPE_HQ];
+	int rc = 0;
+	u32 val = 0;
+
+	dev_err(bcdev->dev, "Lenovo Qi set property = %d, value = %d\n", prop, pval->intval);
+
+	switch (prop) {
+	/* /sys/power_supply/wls_tx open */
+	case POWER_SUPPLY_PROP_WLS_TX_OPEN:
+		gpio_set_value(QI_OPEN_GPIO,pval->intval);
+		rc = write_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_WLS_TX_ATTACHED, pval->intval);
+		break;
+	case POWER_SUPPLY_PROP_WLS_TX_CHARGE_STATE:
+		val = 10;
+		rc = write_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_WLS_TX_CHARGE_STATE, val);
+		break;
+	case POWER_SUPPLY_PROP_WLS_TX_LEVEL:
+		/*to do*/
+		break;
+	case POWER_SUPPLY_PROP_WLS_TX_ATTACHED:
+		/*to do*/
+		rc = write_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_WLS_TX_ATTACHED, pval->intval);
+		break;
+	case POWER_SUPPLY_PROP_WLS_TX_MAC:
+		/*to do*/
+		break;
+	case POWER_SUPPLY_PROP_WLS_TX_TX_IIN:
+		/*to do*/
+		break;
+	case POWER_SUPPLY_PROP_WLS_TX_CMD:
+		dev_err(bcdev->dev, "Lenovo Qi set tx_cmd property pval->intval = %d\n", pval->intval);
+		rc = write_property_id(bcdev, pst, HQ_POWER_SUPPLY_PROP_WLS_TX_CMD, pval->intval);
+		break;
+	default:
+		dev_err(bcdev->dev, ">>>Lenovo Qi set error property<<<\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static ssize_t lenovo_qi_sysfs_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct power_supply *psy = NULL;
+	struct sysfs_info *sysfs_attr;
+	union power_supply_propval pval = {0};
+	int val;
+	ssize_t ret;
+
+	ret = kstrtos32(buf, 0, &val);
+	if (ret < 0)
+		return ret;
+
+	pval.intval = val;
+
+	psy = dev_get_drvdata(dev);
+	if (!psy) {
+		dev_info(&psy->dev, "invalid psy");
+		return ret;
+	}
+
+	sysfs_attr = container_of(attr, struct sysfs_info, attr);
+	lenovo_qi_sysfs_set_property(psy, sysfs_attr->prop, &pval);
+
+	return count;
+}
+
+static ssize_t lenovo_qi_sysfs_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct power_supply *psy = NULL;
+	struct sysfs_info *sysfs_attr;
+	union power_supply_propval pval = {0};
+	ssize_t count = 0;
+
+	psy = dev_get_drvdata(dev);
+	if (!psy) {
+		dev_info(&psy->dev, "invalid psy");
+		return count;
+	}
+
+	sysfs_attr = container_of(attr, struct sysfs_info, attr);
+	lenovo_qi_sysfs_get_property(psy, sysfs_attr->prop, &pval);
+
+	if (sysfs_attr->prop == POWER_SUPPLY_PROP_WLS_TX_MAC && !IS_ERR_OR_NULL(gbcdev))
+		count = scnprintf(buf, PAGE_SIZE, "%02X:%02X:%02X:%02X:%02X:%02X\n", gbcdev->qi_dev.mac[5], gbcdev->qi_dev.mac[4],
+							gbcdev->qi_dev.mac[3], gbcdev->qi_dev.mac[2], gbcdev->qi_dev.mac[1], gbcdev->qi_dev.mac[0]);
+	else
+		count = scnprintf(buf, PAGE_SIZE, "%d\n", pval.intval);
+
+	return count;
+}
+
+static struct sysfs_info wls_tx_sysfs_field_tbl[] = {
+	SYSFS_FIELD_RW(open, POWER_SUPPLY_PROP_WLS_TX_OPEN, false),
+	SYSFS_FIELD_RW(charge_state, POWER_SUPPLY_PROP_WLS_TX_CHARGE_STATE, false),
+	SYSFS_FIELD_RW(level, POWER_SUPPLY_PROP_WLS_TX_LEVEL, false),
+	SYSFS_FIELD_RW(attached, POWER_SUPPLY_PROP_WLS_TX_ATTACHED, false),
+	SYSFS_FIELD_RW(mac, POWER_SUPPLY_PROP_WLS_TX_MAC, false),
+	SYSFS_FIELD_RW(tx_iin, POWER_SUPPLY_PROP_WLS_TX_TX_IIN, false),
+	SYSFS_FIELD_RW(mac_h, POWER_SUPPLY_PROP_WLS_TX_MAC_H, false),
+	SYSFS_FIELD_RW(mac_l, POWER_SUPPLY_PROP_WLS_TX_MAC_L, false),
+	SYSFS_FIELD_RW(cmd, POWER_SUPPLY_PROP_WLS_TX_CMD, false),
+};
+
+static struct attribute
+	*wls_tx_sysfs_attrs[ARRAY_SIZE(wls_tx_sysfs_field_tbl) + 1];
+
+static const struct attribute_group wls_tx_sysfs_attr_group = {
+	.attrs = wls_tx_sysfs_attrs,
+};
+
+static int lenovo_qi_create_sysfs(struct power_supply *psy)
+{
+	int i = 0, length = 0, rc = -1;
+
+	if (!(psy)) {
+		dev_info(&psy->dev, "Invalid psy\n");
+		return rc;
+	}
+
+	if (!strcmp(psy->desc->name, "wls_tx")) {
+		length = ARRAY_SIZE(wls_tx_sysfs_field_tbl);
+		for (i = 0; i < length; i++)
+			wls_tx_sysfs_attrs[i] = &wls_tx_sysfs_field_tbl[i].attr.attr;
+
+		wls_tx_sysfs_attrs[length] = NULL;
+		rc = sysfs_create_group(&psy->dev.kobj, &wls_tx_sysfs_attr_group);
+		if (rc) {
+			dev_info(&psy->dev, "Failed to create battery_sysfs\n");
+			return rc;
+		}
+	} else {
+		/* To do */
+	}
+
+	return rc;
+}
+
+static int lenovo_qi_sysfs_init(struct battery_chg_dev *bcdev)
+{
+	int rc = -1;
+
+	if (!bcdev->psy_list[PSY_TYPE_WLS_TX].psy)
+		return rc;
+
+	rc = lenovo_qi_create_sysfs(bcdev->psy_list[PSY_TYPE_WLS_TX].psy);
+	if (rc) {
+		dev_err(bcdev->dev, "Failed to create sysfs\n");
+		return rc;
+	}
+
+	return rc;
+}
+#endif
+
+#ifdef CONFIG_ARCH_KIRBY
+#define USB_BURN_EVENT_DEALY_MS				5000
+#define USB2_BURN_EN_GPIO	289	//PM8550 GPIO_01
+static void usb_burn_monitor_work(struct work_struct *work)
+{
+	struct battery_chg_dev *bcdev = container_of(work, struct battery_chg_dev,
+			usb_burn_monitor_work.work);
+	int rc = 0;
+	int gpio_level = 0;
+	int usb2_online = 0;
+	int usb2_temp = 25000;
+	int batt_temp = 250;
+	struct psy_state *pst_wls = &bcdev->psy_list[PSY_TYPE_WLS];
+	struct psy_state *pst_batt = &bcdev->psy_list[PSY_TYPE_BATTERY];
+
+	if(!IS_ERR(bcdev->usb2_therm)) {
+		rc = thermal_zone_get_temp(bcdev->usb2_therm, &usb2_temp);
+		if (rc) {
+			pr_err("Failed to get usb2-conn-therm, rc=%d\n", rc);
+			goto out;
+		}
+	}
+	usb2_temp = usb2_temp / 1000;
+
+	rc = read_property_id(bcdev, pst_batt, BATT_TEMP);
+	if (rc < 0) {
+		pr_err("Failed to get BATT_TEMP, rc=%d\n", rc);
+		goto out;
+	}
+	batt_temp = pst_batt->prop[BATT_TEMP] / 10;
+
+	rc = read_property_id(bcdev, pst_wls, WLS_ONLINE);
+	if (rc < 0) {
+		pr_err("Failed to get WLS_ONLINE, rc=%d\n", rc);
+		goto out;
+	}
+	usb2_online = pst_wls->prop[WLS_ONLINE];
+
+	if (0 == usb2_online) {
+		if(usb2_temp < 45 || (usb2_temp < 50 && (usb2_temp-batt_temp) < 10)) {
+			gpio_level = gpio_get_value(USB2_BURN_EN_GPIO);
+			if(1 == gpio_level) {
+				gpio_direction_output(USB2_BURN_EN_GPIO, 0);
+			}
+		}
+	} else {
+		if(usb2_temp > 70 || (usb2_temp > 60 && (usb2_temp-batt_temp) > 20)) {
+			gpio_level = gpio_get_value(USB2_BURN_EN_GPIO);
+			if(0 == gpio_level) {
+				gpio_direction_output(USB2_BURN_EN_GPIO, 1);
+			}
+		}
+	}
+
+	pr_debug("%s, usb2_online=%d, usb2_therm=%s, usb2_temp=%d, gpio01_level=%d\n",
+		__func__, usb2_online, bcdev->usb2_therm->type, usb2_temp, gpio_level);
+
+out:
+	schedule_delayed_work(&bcdev->usb_burn_monitor_work,
+				msecs_to_jiffies(USB_BURN_EVENT_DEALY_MS));
+}
+#endif
+
+#ifdef CONFIG_ARCH_LAPIS
+int lenovo_qi_update_hall(int status, bool force_report)
+{
+	if (IS_ERR_OR_NULL(gbcdev)) {
+		pr_err("[LENOVO_PEN]lenovo_qi_update_hall failed: gbcdev is not ready\n ");
+		return -1;
+	}
+
+	if (status != HALL_NEAR && status != HALL_FAR) {
+		dev_err(gbcdev->dev, "[LENOVO_PEN]lenovo_qi_update_hall: unknow status : %d\n", status);
+		return -1;
+	}
+	gbcdev->qi_dev.wls_hall_status = status;
+	gbcdev->qi_dev.force_report = force_report;
+
+	dev_info(gbcdev->dev, "[LENOVO_PEN]lenovo_qi_update_hall status = %d, force_report = %d\n", status, force_report);
+
+	cancel_work_sync(&gbcdev->qi_update_status);
+	cancel_work_sync(&gbcdev->qi_uevent_report_work);
+
+	schedule_work(&gbcdev->qi_update_status);
+
+	return 0;
+}
+EXPORT_SYMBOL(lenovo_qi_update_hall);
+
+static void qi_update_hall(struct work_struct *work)
+{
+	struct battery_chg_dev *bcdev = container_of(work, struct battery_chg_dev, qi_update_status);
+	struct power_supply *psy = NULL;
+	union power_supply_propval pval = {0};
+
+	if (IS_ERR_OR_NULL(bcdev)) {
+		dev_err(gbcdev->dev, "[LENOVO_PEN]qi_update_hall: bcdev get failed\n");
+		return;
+	}
+
+	psy = power_supply_get_by_name("wls_tx");
+	if (IS_ERR_OR_NULL(psy)) {
+		dev_err(gbcdev->dev, "[LENOVO_PEN]qi_update_hall: wls_tx psy get failed\n");
+		return;
+	}
+
+	pval.intval = bcdev->qi_dev.wls_hall_status;
+	dev_info(gbcdev->dev, "[LENOVO_PEN]lenovo_qi_update_hall status = %d\n", pval.intval);
+	lenovo_qi_sysfs_set_property(psy, POWER_SUPPLY_PROP_WLS_TX_OPEN, &pval);
+
+	if (bcdev->qi_dev.wls_hall_status == HALL_FAR)
+		schedule_work(&gbcdev->qi_uevent_report_work);
+	else if ((bcdev->qi_dev.wls_hall_status == HALL_NEAR) && gbcdev->qi_dev.force_report) {
+		gbcdev->qi_dev.force_report = false;
+		schedule_work(&gbcdev->qi_uevent_report_work);
+	}
+	return;
+}
+
+static void qi_uevent_report(struct work_struct *work)
+{
+	struct battery_chg_dev *bcdev = container_of(work, struct battery_chg_dev, qi_uevent_report_work);
+	union power_supply_propval pval = {0};
+	char qi_pen_string[] = "UEVENT_TO=PEN_FRAMEWORK";
+	char qi_mac_string[64] = {0};
+	char qi_level_string[64] = {0};
+	char qi_attached_string[64] = {0};
+	char qi_charging_state_string[64] = {0};
+	char qi_pen_type[] = "TYPE=QI";
+	int tx_status = 0;
+	int ret = 0;
+	int i;
+	// char qi_writependata_string[64] = {0};
+	char *envp[] = {
+		qi_pen_string,
+		qi_mac_string,
+		qi_level_string,
+		qi_attached_string,
+		qi_charging_state_string,
+		qi_pen_type,
+		NULL,
+	};
+	struct power_supply *psy = power_supply_get_by_name("wls_tx");
+	if (IS_ERR_OR_NULL(psy)) {
+		pr_err("wls_tx psy get failed\n");
+		return;
+	}
+
+	tx_status = gpio_get_value(QI_OPEN_GPIO);
+	dev_info(bcdev->dev, "[LENOVO_PEN]qi_uevent_report tx_status:%d\n", tx_status);
+	if (tx_status) {
+		lenovo_qi_sysfs_get_property(psy, POWER_SUPPLY_PROP_WLS_TX_MAC, &pval);
+	} else {
+		for (i = 0; i < 6; i++)
+			bcdev->qi_dev.mac[i] = 0;
+	}
+	sprintf(qi_mac_string,  "MAC=%02X:%02X:%02X:%02X:%02X:%02X", bcdev->qi_dev.mac[5], bcdev->qi_dev.mac[4],
+					bcdev->qi_dev.mac[3], bcdev->qi_dev.mac[2], bcdev->qi_dev.mac[1], bcdev->qi_dev.mac[0]);
+
+	if (tx_status) {
+		lenovo_qi_sysfs_get_property(psy, POWER_SUPPLY_PROP_WLS_TX_LEVEL, &pval);
+		ret = pval.intval;
+	} else {
+		ret = 0;
+	}
+	sprintf(qi_level_string,  "LEVEL=%d", ret);
+
+	if (tx_status) {
+		lenovo_qi_sysfs_get_property(psy, POWER_SUPPLY_PROP_WLS_TX_ATTACHED, &pval);
+		ret = pval.intval;
+	} else {
+		ret = 0;
+	}
+	sprintf(qi_attached_string,  "ATTACHED=%d", ret);
+
+	if (tx_status) {
+		lenovo_qi_sysfs_get_property(psy, POWER_SUPPLY_PROP_WLS_TX_CHARGE_STATE, &pval);
+		ret = pval.intval;
+	} else {
+		ret = 0;
+	}
+	sprintf(qi_charging_state_string,  "CHARGING_STATE=%s", charge_state_string[ret]);
+
+	dev_info(bcdev->dev, "[LENOVO_PEN]pen_uevent:%s, mac:%s, level:%s, attach:%s, charging_state:%s type:%s\n",
+						qi_pen_string, qi_mac_string, qi_level_string, qi_attached_string, qi_charging_state_string, qi_pen_type);
+	kobject_uevent_env(&bcdev->dev->kobj, KOBJ_CHANGE, envp);
+
+	// if (tx_status) {
+		// dev_info(bcdev->dev, "[LENOVO_PEN]tx_status = %d\n, udpate uevent 5s later", tx_status);
+		// schedule_delayed_work(&gbcdev->qi_uevent_report_work, 5000);
+	// }
+	return;
+}
+#endif
+
 static int battery_chg_probe(struct platform_device *pdev)
 {
 	struct battery_chg_dev *bcdev;
@@ -2749,6 +4573,16 @@ static int battery_chg_probe(struct platform_device *pdev)
 	bcdev->psy_list[PSY_TYPE_WLS].prop_count = WLS_PROP_MAX;
 	bcdev->psy_list[PSY_TYPE_WLS].opcode_get = BC_WLS_STATUS_GET;
 	bcdev->psy_list[PSY_TYPE_WLS].opcode_set = BC_WLS_STATUS_SET;
+#ifdef CONFIG_ARCH_LAPIS
+	bcdev->psy_list[PSY_TYPE_WLS_TX].map = wls_tx_prop_map;
+	bcdev->psy_list[PSY_TYPE_WLS_TX].prop_count = WLS_TX_PROP_MAX;
+	bcdev->psy_list[PSY_TYPE_WLS_TX].opcode_get = BC_WLS_TX_STATUS_GET;
+	bcdev->psy_list[PSY_TYPE_WLS_TX].opcode_set = BC_WLS_TX_STATUS_SET;
+#endif
+	bcdev->psy_list[PSY_TYPE_HQ].map = hq_prop_map;
+	bcdev->psy_list[PSY_TYPE_HQ].prop_count = HQ_POWER_SUPPLY_PROPERTIES_MAX;
+	bcdev->psy_list[PSY_TYPE_HQ].opcode_get = HQ_POWER_SUPPLY_GET_REQ;
+	bcdev->psy_list[PSY_TYPE_HQ].opcode_set = HQ_POWER_SUPPLY_SET_REQ;
 	bcdev->usb_active[USB_1_PORT_ID] = true;
 
 	rc = of_property_read_u32(dev->of_node, "qcom,multiport-usb", &bcdev->num_usb_ports);
@@ -2791,6 +4625,11 @@ static int battery_chg_probe(struct platform_device *pdev)
 	INIT_WORK(&bcdev->subsys_up_work, battery_chg_subsys_up_work);
 	INIT_WORK(&bcdev->usb_type_work, battery_chg_update_usb_type_work);
 	INIT_WORK(&bcdev->battery_check_work, battery_chg_check_status_work);
+	bcdev->charge_wakelock = wakeup_source_register(NULL, "charge_wakelock");
+#ifdef CONFIG_ARCH_LAPIS
+	INIT_WORK(&bcdev->qi_uevent_report_work, qi_uevent_report);
+	INIT_WORK(&bcdev->qi_update_status, qi_update_hall);
+#endif
 	bcdev->dev = dev;
 
 	client_data.id = MSG_OWNER_BC;
@@ -2853,6 +4692,18 @@ static int battery_chg_probe(struct platform_device *pdev)
 		goto error;
 	}
 
+	rc = hq_battery_sysfs_create_group(bcdev);
+	if (rc < 0) {
+		dev_err(dev, "Failed to create battery class rc=%d\n", rc);
+		goto error;
+	}
+
+	rc = hq_usb_sysfs_create_group(bcdev);
+	if (rc < 0) {
+		dev_err(dev, "Failed to create usb class rc=%d\n", rc);
+		goto error;
+	}
+
 	pst = &bcdev->psy_list[PSY_TYPE_BATTERY];
 	tcd = devm_thermal_of_cooling_device_register(dev, dev->of_node,
 			(char *)pst->psy->desc->name, bcdev, &battery_tcd_ops);
@@ -2864,7 +4715,7 @@ static int battery_chg_probe(struct platform_device *pdev)
 		goto error;
 	}
 
-	bcdev->wls_fw_update_time_ms = WLS_FW_UPDATE_TIME_MS;
+	bcdev->qi_dev.wls_fw_update_time_ms = WLS_FW_UPDATE_TIME_MS;
 	battery_chg_add_debugfs(bcdev);
 	bcdev->notify_en = false;
 	battery_chg_notify_enable(bcdev);
@@ -2893,9 +4744,29 @@ static int battery_chg_probe(struct platform_device *pdev)
 
 	schedule_work(&bcdev->usb_type_work);
 
+	gbcdev = bcdev;
+
+#ifdef CONFIG_ARCH_LAPIS
+	lenovo_qi_sysfs_init(bcdev);
+#endif
+
 	rc = get_charge_control_en(bcdev);
 	if (rc < 0)
 		pr_debug("Failed to read charge_control_en, rc = %d\n", rc);
+
+/* Lapis code for JLAPIS-1032 by zhoujj21 at 2024/06/14 start */
+#ifdef CONFIG_ARCH_KIRBY
+	bcdev->usb2_therm = thermal_zone_get_zone_by_name("usb2-conn-therm");
+	if (IS_ERR(bcdev->usb2_therm)) {
+		pr_debug("Failed to get usb2-conn-therm name\n");
+	}
+	INIT_DELAYED_WORK(&bcdev->usb_burn_monitor_work, usb_burn_monitor_work);
+	schedule_delayed_work(&bcdev->usb_burn_monitor_work, msecs_to_jiffies(20000));
+
+	bcdev->battery_abnormal = false;
+	bcdev->fake_abnormal_level = -EINVAL;
+#endif
+/* Lapis code for JLAPIS-1032 by zhoujj21 at 2024/06/14 end */
 
 	/*
 	 * Register panel notifier last, only after bcdev is fully
@@ -2921,6 +4792,10 @@ error:
 	cancel_work_sync(&bcdev->usb_type_work);
 	cancel_work_sync(&bcdev->subsys_up_work);
 	cancel_work_sync(&bcdev->battery_check_work);
+#ifdef CONFIG_ARCH_LAPIS
+	cancel_work_sync(&bcdev->qi_update_status);
+	cancel_work_sync(&bcdev->qi_uevent_report_work);
+#endif
 	complete(&bcdev->ack);
 	unregister_reboot_notifier(&bcdev->reboot_notifier);
 	if (bcdev->typec_class)
@@ -2950,9 +4825,40 @@ static int battery_chg_remove(struct platform_device *pdev)
 	cancel_work_sync(&bcdev->subsys_up_work);
 	cancel_work_sync(&bcdev->usb_type_work);
 	cancel_work_sync(&bcdev->battery_check_work);
+#ifdef CONFIG_ARCH_LAPIS
+	cancel_work_sync(&bcdev->qi_update_status);
+	cancel_work_sync(&bcdev->qi_uevent_report_work);
+#endif
 	unregister_reboot_notifier(&bcdev->reboot_notifier);
 	if (bcdev->typec_class)
 		qti_typec_class_deinit(bcdev->typec_class);
+/* Lapis code for JLAPIS-1032 by zhoujj21 at 2024/06/14 start */
+#ifdef CONFIG_ARCH_KIRBY
+	cancel_delayed_work_sync(&bcdev->usb_burn_monitor_work);
+#endif
+/* Lapis code for JLAPIS-1032 by zhoujj21 at 2024/06/14 end */
+
+	return 0;
+}
+
+static int battery_chg_suspend(struct platform_device *pdev, pm_message_t state)
+{
+	struct battery_chg_dev *bcdev = platform_get_drvdata(pdev);
+
+	dev_info(bcdev->dev, "battery_chg_suspend\n");
+
+	write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_HQ], HQ_POWER_SUPPLY_PROP_FG_MONITOR_CMD, 0);
+
+	return 0;
+}
+
+static int battery_chg_resume(struct platform_device *pdev)
+{
+	struct battery_chg_dev *bcdev = platform_get_drvdata(pdev);
+
+	dev_info(bcdev->dev, "battery_chg_resume\n");
+
+	write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_HQ], HQ_POWER_SUPPLY_PROP_FG_MONITOR_CMD, 1);
 
 	return 0;
 }
@@ -2969,6 +4875,8 @@ static struct platform_driver battery_chg_driver = {
 	},
 	.probe = battery_chg_probe,
 	.remove = battery_chg_remove,
+        .suspend = battery_chg_suspend,
+        .resume = battery_chg_resume,
 };
 module_platform_driver(battery_chg_driver);
 

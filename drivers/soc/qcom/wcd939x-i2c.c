@@ -3,6 +3,7 @@
  * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
+#define DEBUG
 #include <linux/usb/typec.h>
 #include <linux/usb/ucsi_glink.h>
 #include <linux/soc/qcom/wcd939x-i2c.h>
@@ -72,6 +73,9 @@ static const struct wcd_usbss_reg_mask_val coeff_init[] = {
 	{WCD_USBSS_RATIO_SPKR_REXT_R_MSB, 0x7F, 0x04},
 };
 
+int direction_value = 0;
+int swap_flag = 0;
+
 static struct wcd_usbss_ctxt *wcd_usbss_ctxt_;
 
 /* Required for kobj_attributes */
@@ -95,7 +99,6 @@ static struct kobj_attribute wcd_usbss_surge_period_attribute =
 
 static struct kobj_attribute wcd_usbss_standby_enable_attribute =
 	__ATTR(standby_mode, 0220, NULL, wcd_usbss_standby_store);
-
 
 static int acquire_runtime_env(struct wcd_usbss_ctxt *priv)
 {
@@ -521,20 +524,21 @@ static void wcd_usbss_standby_control_locked(bool enter_standby)
 		dev_dbg(wcd_usbss_ctxt_->dev, "%s: Enabling standby mode\n",
 			__func__);
 		rc = regmap_update_bits(wcd_usbss_ctxt_->regmap, WCD_USBSS_USB_SS_CNTL,
-				0x10, 0x10);
+						0x10, 0x10);
 		if (rc < 0)
 			dev_err(wcd_usbss_ctxt_->dev, "%s: enter standby failed\n", __func__);
 		else
 			wcd_usbss_ctxt_->is_in_standby = true;
+
 	} else {
 		dev_dbg(wcd_usbss_ctxt_->dev, "%s: Disabling standby mode\n",
 			__func__);
 		rc = regmap_update_bits(wcd_usbss_ctxt_->regmap, WCD_USBSS_USB_SS_CNTL,
-				0x10, 0x00);
+						0x10, 0x00);
 		if (rc < 0) {
-			dev_err(wcd_usbss_ctxt_->dev, "%s: exit standby failed\n", __func__);
+				dev_err(wcd_usbss_ctxt_->dev, "%s: exit standby failed\n", __func__);
 		} else {
-			/* 10ms wait recommended to get WCD USBSS out of standby */
+				/* 10ms wait recommended to get WCD USBSS out of standby */
 			usleep_range(10000, 10100);
 			wcd_usbss_ctxt_->is_in_standby = false;
 		}
@@ -641,11 +645,9 @@ static int wcd_usbss_surge_kthread_fn(void *p)
 {
 	while (!kthread_should_stop()) {
 		if (acquire_runtime_env(wcd_usbss_ctxt_) >= 0) {
-
 			if (wcd_usbss_ctxt_->surge_enable &&
 					wcd_usbss_is_in_reset_state())
 				wcd_usbss_reset_routine();
-
 			release_runtime_env(wcd_usbss_ctxt_);
 		}
 
@@ -1181,10 +1183,14 @@ int wcd_usbss_switch_update(enum wcd_usbss_cable_types ctype,
 		case WCD_USBSS_AATC:
 			wcd_usbss_ctxt_->cable_status &= ~BIT(WCD_USBSS_GND_MIC_SWAP_AATC);
 			audio_switch = true;
+		    direction_value = 1;
+			swap_flag = 1;
 			break;
 		case WCD_USBSS_GND_MIC_SWAP_AATC:
 			wcd_usbss_ctxt_->cable_status &= ~BIT(WCD_USBSS_AATC);
 			audio_switch = true;
+		    direction_value = 2;
+			swap_flag = 2;
 			break;
 		case WCD_USBSS_HSJ_CONNECT:
 			wcd_usbss_ctxt_->cable_status &= ~BIT(WCD_USBSS_GND_MIC_SWAP_HSJ);
@@ -1193,6 +1199,8 @@ int wcd_usbss_switch_update(enum wcd_usbss_cable_types ctype,
 		case WCD_USBSS_GND_MIC_SWAP_HSJ:
 			wcd_usbss_ctxt_->cable_status &= ~BIT(WCD_USBSS_HSJ_CONNECT);
 			audio_switch = true;
+		    direction_value = 2;
+			swap_flag = 2;
 			break;
 		default:
 			break;
@@ -1225,6 +1233,8 @@ int wcd_usbss_switch_update(enum wcd_usbss_cable_types ctype,
 			wcd_usbss_dpdm_switch_update(true, true);
 			break;
 		case WCD_USBSS_AATC:
+			direction_value = 1;
+			swap_flag = 1;
 			/* Update power mode to mode 1 for AATC */
 			regmap_update_bits(wcd_usbss_ctxt_->regmap,
 				WCD_USBSS_USB_SS_CNTL, 0x07, 0x01);
@@ -1284,6 +1294,8 @@ int wcd_usbss_switch_update(enum wcd_usbss_cable_types ctype,
 			usleep_range(10000, 10100);
 			break;
 		case WCD_USBSS_GND_MIC_SWAP_AATC:
+			direction_value = 2;
+		    swap_flag = 2;
 			dev_info(wcd_usbss_ctxt_->dev,
 					"%s: GND MIC Swap register updates..\n", __func__);
 			/* Update power mode to mode 1 for AATC */
@@ -1343,6 +1355,8 @@ int wcd_usbss_switch_update(enum wcd_usbss_cable_types ctype,
 					WCD_USBSS_SWITCH_SETTINGS_ENABLE, 0x07, 0x07);
 			break;
 		case WCD_USBSS_GND_MIC_SWAP_HSJ:
+			direction_value = 2;
+			swap_flag = 2;
 			/* Disable SENSE, MIC, AGND switches */
 			regmap_update_bits(wcd_usbss_ctxt_->regmap,
 					WCD_USBSS_SWITCH_SETTINGS_ENABLE, 0x07, 0x00);
@@ -1636,10 +1650,10 @@ static irqreturn_t wcd_usbss_sdam_notifier_handler(int irq, void *data)
 	rc = acquire_runtime_env(wcd_usbss_ctxt_);
 	if (rc == -EACCES) {
 		dev_dbg(priv->dev, "%s: acquire_runtime_env failed: %d, check suspend\n",
-				__func__, rc);
+					__func__, rc);
 	} else if (rc < 0) {
 		dev_err(priv->dev, "%s: acquire_runtime_env failed: %d\n",
-				__func__, rc);
+					__func__, rc);
 		goto unlock_mutex;
 	}
 
@@ -1701,6 +1715,50 @@ exit:
 	return rc;
 }
 
+static ssize_t direction_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct wcd_usbss_ctxt *priv = dev_get_drvdata(dev);
+	unsigned int databuf[2] = {0};
+
+	if (sscanf(buf, "%x %x", &databuf[0], &databuf[1]) == 2)
+		regmap_write(priv->regmap, databuf[0], databuf[1]);
+
+	dev_info(priv->dev, "%s: databuf[0]:%x, databuf[1]:%x\n",
+		__func__, databuf[0], databuf[1]);
+
+	return count;
+}
+
+static ssize_t direction_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct wcd_usbss_ctxt *priv = dev_get_drvdata(dev);
+	if(swap_flag == 1)
+		direction_value = 1;
+	else if(swap_flag == 2)
+		direction_value = 2;
+	else
+		direction_value = 0;
+
+	dev_info(priv->dev, "%s: direction_value: %d\n", __func__, direction_value);
+	
+	return snprintf(buf, PAGE_SIZE, "%d\n", direction_value);
+}
+
+static DEVICE_ATTR_RW(direction);
+
+static struct attribute *wcd939x_attributes[] = {
+	&dev_attr_direction.attr,
+	NULL
+};
+
+
+static struct attribute_group wcd939x_attribute_group = {
+	.attrs = wcd939x_attributes,
+};
+
+
 static int wcd_usbss_probe(struct i2c_client *i2c)
 {
 	struct wcd_usbss_ctxt *priv;
@@ -1734,8 +1792,8 @@ static int wcd_usbss_probe(struct i2c_client *i2c)
 	if (ARRAY_SIZE(supply_names) >= WCD_USBSS_SUPPLY_MAX) {
 		dev_err(priv->dev, "Unsupported number of supplies: %d\n",
 				ARRAY_SIZE(supply_names));
-		rc = -EINVAL;
-		goto err_data;
+			rc = -EINVAL;
+			goto err_data;
 	}
 	for (i = 0; i < ARRAY_SIZE(supply_names); ++i)
 		priv->supplies[i].supply = supply_names[i];
@@ -1811,6 +1869,12 @@ static int wcd_usbss_probe(struct i2c_client *i2c)
 	}
 
 	mutex_init(&priv->notification_lock);
+
+	dev_set_drvdata(&i2c->dev, priv);
+    rc = sysfs_create_group(&i2c->dev.kobj, &wcd939x_attribute_group);
+	if (rc < 0) {
+		dev_err(priv->dev, "error creating sysfs attr files");
+	}
 
 	wcd_usbss_update_reg_init(priv->regmap);
 	INIT_WORK(&priv->usbc_analog_work,
@@ -1906,7 +1970,6 @@ static int wcd_usbss_pm_resume(struct device *dev)
 
 	if (!wcd_usbss_ctxt_)
 		return 0;
-
 	mutex_lock(&wcd_usbss_ctxt_->switch_update_lock);
 	if (wcd_usbss_ctxt_->defer_writes) {
 		dev_dbg(wcd_usbss_ctxt_->dev, "wcd defer writes in progress");

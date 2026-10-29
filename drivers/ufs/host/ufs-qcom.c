@@ -1641,7 +1641,7 @@ static void ufs_qcom_set_esi_affinity_hint(struct ufs_hba *hba)
 			if (cpumask_subset(get_cpu_mask(i), &host->cluster_mask[CLUSTER_1]) &&
 					(num_cpu++ <= 2))
 				affinity_mask = host->cluster_mask[CLUSTER_2];
-			else
+		else
 				affinity_mask = host->cluster_mask[CLUSTER_1];
 		}
 
@@ -2290,12 +2290,14 @@ static void ufs_qcom_set_tx_hs_equalizer(struct ufs_hba *hba,
 	int ret, i;
 
 	ret = ufs_qcom_phy_get_tx_hs_equalizer(phy, gear, &equalizer_val);
+	dev_err(hba->dev, "%s: equalizer_val: %d, gear: %d, ret: %d \n", __func__, equalizer_val, gear, ret);
 	if (ret)
 		return;
 
 	for (i = 0; i < tx_lanes; i++) {
 		ret = ufshcd_dme_set(hba, UIC_ARG_MIB_SEL(TX_HS_EQUALIZER, i),
 			equalizer_val);
+		dev_err(hba->dev, "%s: equalizer_val: %d, lane: %d", __func__, equalizer_val, i);
 		if (ret)
 			dev_err(hba->dev, "%s: failed equalizer lane %d\n",
 				__func__, i);
@@ -3689,7 +3691,7 @@ static void ufs_qcom_read_nvmem_cell(struct ufs_qcom_host *host)
 				__func__, host->limit_phy_submode);
 
 		if (of_property_read_bool(np, "limit-rate-ufs3")) {
-			host->limit_rate = PA_HS_MODE_A;
+		host->limit_rate = PA_HS_MODE_A;
 			dev_dbg(host->hba->dev, "UFS 3.x device Mode is set to RATE A\n");
 		}
 	}
@@ -5078,7 +5080,8 @@ static struct ufs_dev_quirk ufs_qcom_dev_fixups[] = {
 	  .quirk = UFS_DEVICE_QUIRK_DELAY_BEFORE_LPM },
 	{ .wmanufacturerid = UFS_VENDOR_SKHYNIX,
 	  .model = UFS_ANY_MODEL,
-	  .quirk = UFS_DEVICE_QUIRK_DELAY_BEFORE_LPM },
+	  .quirk = UFS_DEVICE_QUIRK_DELAY_BEFORE_LPM |
+	   UFS_DEVICE_QUIRK_PA_TX_DEEMPHASIS_TUNING},
 	{ .wmanufacturerid = UFS_VENDOR_WDC,
 	  .model = UFS_ANY_MODEL,
 	  .quirk = UFS_DEVICE_QUIRK_HOST_PA_TACTIVATE },
