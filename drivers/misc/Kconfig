@@ -588,6 +588,14 @@ config LONTIUM_LT7911UXC
 	  over the camera CCI bus and notifies userspace via uevents.
 
 source "drivers/misc/rtimd-i2c/Kconfig"
+
+config LENOVO_BL_BOOSTER
+	tristate "Lenovo LCD Backlight driver for i2c backlight chip like ktz8866"
+	depends on I2C
+	default n
+	help
+	  This option enables support for the LCD backlight using bkl chip.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
@@ -608,4 +616,5 @@ source "drivers/misc/uacce/Kconfig"
 source "drivers/misc/pvpanic/Kconfig"
 source "drivers/misc/mchp_pci1xxxx/Kconfig"
 source "drivers/misc/vd628x/Kconfig"
+source "drivers/misc/hqsysfs/Kconfig"
 endmenu
