@@ -3,7 +3,6 @@
  * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
-#define DEBUG
 #include <linux/usb/typec.h>
 #include <linux/usb/ucsi_glink.h>
 #include <linux/soc/qcom/wcd939x-i2c.h>
@@ -73,8 +72,8 @@ static const struct wcd_usbss_reg_mask_val coeff_init[] = {
 	{WCD_USBSS_RATIO_SPKR_REXT_R_MSB, 0x7F, 0x04},
 };
 
-int direction_value = 0;
-int swap_flag = 0;
+static int direction_value;
+static int swap_flag;
 
 static struct wcd_usbss_ctxt *wcd_usbss_ctxt_;
 
