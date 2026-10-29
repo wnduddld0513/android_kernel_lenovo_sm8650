@@ -26,7 +26,11 @@ obj-$(CONFIG_INPUT_JOYSTICK)	+= joystick/
 obj-$(CONFIG_INPUT_TABLET)	+= tablet/
 obj-$(CONFIG_INPUT_TOUCHSCREEN)	+= touchscreen/
 obj-$(CONFIG_INPUT_MISC)	+= misc/
-
+#Lapis code by sunyt13 at 2024-4-16 for fp bringup start
+obj-$(CONFIG_INPUT_FINGERPRINT)		+=  fingerprint/
+#Lapis code by sunyt13 at 2024-4-16 for fp bringup end
+obj-$(CONFIG_HQ_PEN_HALL)		+=  hall/
 obj-$(CONFIG_INPUT_APMPOWER)	+= apm-power.o
 
 obj-$(CONFIG_RMI4_CORE)		+= rmi4/
+obj-$(CONFIG_AWINIC_HAPTIC_HV)	+= haptic86937/

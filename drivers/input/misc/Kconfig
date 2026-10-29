@@ -197,7 +197,7 @@ config INPUT_QPNP_POWER_ON
 
 config INPUT_QCOM_HV_HAPTICS
 	tristate "QTI High Voltage Haptics support"
-	depends on MFD_SPMI_PMIC
+	default n
 	help
 	  This option enables device driver support for the high voltage haptics
 	  peripheral found on Qualcomm Technologies, Inc. PMICs.  The high voltage
