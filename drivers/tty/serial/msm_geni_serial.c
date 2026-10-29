@@ -33,6 +33,7 @@
 #include <linux/tty_flip.h>
 #include <uapi/linux/msm_geni_serial.h>
 #include <linux/bootmarker_kernel.h>
+#include "./lenovo_keyboard/lenovo_common.h"
 
 static bool con_enabled = IS_ENABLED(CONFIG_SERIAL_MSM_GENI_CONSOLE_DEFAULT_ENABLED);
 
@@ -2545,6 +2546,9 @@ static int msm_geni_serial_prep_dma_tx(struct uart_port *uport)
 			msm_port->kpi_idx = 0;
 	}
 
+	if (uport->mapbase == 0x888000)
+                lenovo_kb_enable_uart_tx(1);
+
 	msm_geni_serial_setup_tx(uport, xmit_size);
 	ret = geni_se_tx_dma_prep(&msm_port->se, &xmit->buf[xmit->tail],
 			xmit_size, &msm_port->tx_dma);
@@ -2910,7 +2914,7 @@ static void start_rx_sequencer(struct uart_port *uport)
 			     "%s: start xfer_rx\n", __func__);
 		if (msm_geni_uart_gsi_xfer_rx(uport))
 			UART_LOG_DBG(port->ipc_log_misc, uport->dev,
-				     "%s: RX xfer is failed\n", __func__);
+				    "%s: RX xfer is failed\n", __func__);
 		geni_status = geni_read_reg(uport->membase, SE_GENI_STATUS);
 		UART_LOG_DBG(port->ipc_log_misc, uport->dev,
 			     "%s: xfer_rx done. geni_status:0x%x\n",
@@ -3550,6 +3554,9 @@ static int msm_geni_serial_handle_dma_rx(struct uart_port *uport, bool drop_rx)
 
 	tport = &uport->state->port;
 	ret = tty_insert_flip_string(tport, (unsigned char *)(msm_port->rx_buf), rx_bytes);
+	if (uport->mapbase == 0x888000)
+		lenovo_kb_analyze((unsigned char *)(msm_port->rx_buf), rx_bytes);
+
 	rx_bytes_copied = ret;
 	if (ret != rx_bytes) {
 		UART_LOG_DBG(msm_port->ipc_log_rx, uport->dev,
@@ -3667,6 +3674,8 @@ static int msm_geni_serial_handle_dma_tx(struct uart_port *uport)
 		if (!uart_console(uport)) {
 			UART_LOG_DBG(msm_port->ipc_log_misc, uport->dev,
 				"%s.Tx sent out, Power off\n", __func__);
+			if(uport->mapbase == 0x888000)
+                        	lenovo_kb_enable_uart_tx(0);
 			msm_geni_serial_power_off(uport);
 		}
 		uart_write_wakeup(uport);
@@ -4211,10 +4220,10 @@ static void msm_geni_serial_shutdown(struct uart_port *uport)
 				dma_release_channel(msm_port->gsi->rx_c);
 				for (i = 0; i < 4; i++) {
 					if (msm_port->dma_addr[i]) {
-						geni_se_common_iommu_free_buf(rx_dev,
-								&msm_port->dma_addr[i],
-								msm_port->rx_gsi_buf[i],
-								DMA_RX_BUF_SIZE);
+					geni_se_common_iommu_free_buf(rx_dev,
+								      &msm_port->dma_addr[i],
+								      msm_port->rx_gsi_buf[i],
+								      DMA_RX_BUF_SIZE);
 						msm_port->rx_gsi_buf[i] = NULL;
 					}
 
@@ -4293,8 +4302,8 @@ static void msm_geni_serial_shutdown(struct uart_port *uport)
 				msm_port->serial_rsc.geni_gpio_shutdown);
 			if (ret)
 				UART_LOG_DBG(msm_port->ipc_log_misc, uport->dev,
-					     "%s: Error %d pinctrl_select_state\n",
-					     __func__, ret);
+				      "%s: Error %d pinctrl_select_state\n",
+					__func__, ret);
 		}
 
 		/* Reset UART error to default during port_close() */
@@ -4307,6 +4316,9 @@ static void msm_geni_serial_shutdown(struct uart_port *uport)
 	geni_capture_stop_time(&msm_port->se, msm_port->ipc_log_kpi, __func__,
 			       msm_port->uart_kpi, start_time, 0, 0);
 	UART_LOG_DBG(msm_port->ipc_log_misc, uport->dev, "%s: End %d\n", __func__, ret);
+
+	if (uport->mapbase == 0x888000)
+		lenovo_kb_set_uport_filp(uport, 0);
 }
 
 /*
@@ -4532,6 +4544,9 @@ static int msm_geni_serial_startup(struct uart_port *uport)
 	msm_port->port_state = UART_PORT_OPEN;
 	geni_capture_stop_time(&msm_port->se, msm_port->ipc_log_kpi, __func__,
 			       msm_port->uart_kpi, start_time, 0, 0);
+
+	if (uport->mapbase == 0x888000)
+		lenovo_kb_set_uport_filp(uport, 1);
 exit_startup:
 	if (likely(!uart_console(uport)))
 		msm_geni_serial_power_off(&msm_port->uport);
@@ -4783,7 +4798,7 @@ static int msm_geni_serial_config_baud_rate(struct uart_port *uport,
 	if (clk_freq_diff)
 		UART_LOG_DBG(port->ipc_log_misc, uport->dev,
 			     "%s src_clk freq_diff:%d baud:%d clk_rate:%lu clk_div:%d\n",
-			     __func__, clk_freq_diff, baud, clk_rate, clk_div);
+			__func__, clk_freq_diff, baud, clk_rate, clk_div);
 
 	uport->uartclk = clk_rate;
 	ret = clk_set_rate(port->serial_rsc.se_clk, clk_rate);
@@ -4831,8 +4846,8 @@ static void msm_geni_serial_set_termios(struct uart_port *uport,
 		ret = msm_geni_serial_power_on(uport);
 		if (ret) {
 			UART_LOG_DBG(port->ipc_log_misc, uport->dev,
-				     "%s: Failed to vote clock on:%d\n",
-				     __func__, ret);
+				    "%s: Failed to vote clock on:%d\n",
+				    __func__, ret);
 			return;
 		}
 	}
@@ -4850,7 +4865,7 @@ static void msm_geni_serial_set_termios(struct uart_port *uport,
 		poll_wait_time = msecs_to_jiffies(POLL_WAIT_TIMEOUT_MSEC);
 		if (!wait_for_completion_timeout(&port->xfer, poll_wait_time))
 			UART_LOG_DBG(port->ipc_log_misc, uport->dev,
-				     "%s:Timeout for stop_rx\n", __func__);
+				    "%s:Timeout for stop_rx\n", __func__);
 	}
 
 	mutex_lock(&port->uart_ssr.ssr_lock);
@@ -5437,8 +5452,12 @@ static int msm_geni_serial_get_irq_pinctrl(struct platform_device *pdev,
 	dev_port->name = devm_kasprintf(uport->dev, GFP_KERNEL,
 					"msm_serial_geni%d", uport->line);
 	irq_set_status_flags(uport->irq, IRQ_NOAUTOEN);
-	ret = devm_request_irq(uport->dev, uport->irq, msm_geni_serial_isr,
+	if (uport->mapbase != 0x888000)
+		ret = devm_request_irq(uport->dev, uport->irq, msm_geni_serial_isr,
 				IRQF_TRIGGER_HIGH, dev_port->name, uport);
+	else
+		ret = devm_request_threaded_irq(uport->dev, uport->irq, NULL, msm_geni_serial_isr,
+				IRQF_TRIGGER_HIGH | IRQF_ONESHOT, dev_port->name, uport);
 	if (ret) {
 		dev_err(uport->dev, "%s: Failed to get IRQ ret %d\n",
 							__func__, ret);
@@ -6338,10 +6357,12 @@ static int msm_geni_serial_sys_resume(struct device *dev)
 		if (!uart_console(uport))
 			port->resuming_from_deep_sleep = true;
 
-		geni_capture_stop_time(&port->se, port->ipc_log_kpi,
-				       __func__, port->uart_kpi, start_time, 0, 0);
-
-		return msm_geni_serial_sys_hib_resume(dev);
+	geni_capture_stop_time(&port->se, port->ipc_log_kpi,
+			       __func__, port->uart_kpi, start_time, 0, 0);
+		if (uport->mapbase != 0x888000)
+			return msm_geni_serial_sys_hib_resume(dev);
+		else
+			msm_geni_serial_sys_hib_resume(dev);
 	}
 
 	/* Platform driver is registered for console and when console
