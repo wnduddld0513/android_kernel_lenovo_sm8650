@@ -124,6 +124,15 @@ static int hall_probe(struct platform_device * pdev)
     LOG_INFO("Enter %s\n", __func__);
 
     hall_pinctrl = devm_pinctrl_get(&pdev->dev);
+    if (IS_ERR(hall_pinctrl)) {
+        /* The lapis dtbo hall_detect node has no pinctrl-0 */
+        if (PTR_ERR(hall_pinctrl) == -ENODEV) {
+            LOG_INFO(" no hall pinctrl\n");
+            return 0;
+        }
+        return PTR_ERR(hall_pinctrl);
+    }
+
     state = pinctrl_lookup_state(hall_pinctrl, "hall_active");
     if (IS_ERR(state)) {
         LOG_INFO(" can't find hall active\n");
