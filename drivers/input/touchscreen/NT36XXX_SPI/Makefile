@@ -3,14 +3,13 @@
 #
 
 # Each configuration option enables a list of files.
-ENV_VARIABLE_FILE := $(abspath ../../../../../../../../../../../../../env_variable.txt)
-HQ_TARGET_PRODUCT := $(shell grep "HQ_TARGET_PRODUCT" $(ENV_VARIABLE_FILE) | cut -d'=' -f2)
-$(info touch get HQ_TARGET_PRODUCT: $(HQ_TARGET_PRODUCT) from ENV_VARIABLE_FILE: $(ENV_VARIABLE_FILE))
-
-ifeq ($(HQ_TARGET_PRODUCT), $(filter $(HQ_TARGET_PRODUCT), kirby_row kirby_prc))
-EXTRA_CFLAGS += -DBUILD_KIRBY_TOUCH
-else ifeq ($(HQ_TARGET_PRODUCT), $(filter $(HQ_TARGET_PRODUCT), lapis_row lapis_prc))
+# The vendor build picked the board from an env_variable.txt outside the
+# kernel tree; without it HQ_TARGET_PRODUCT is empty and the old ifeq matched
+# Kirby, loading the wrong panel firmware names. Key off the board config.
+ifeq ($(CONFIG_ARCH_LAPIS),y)
 EXTRA_CFLAGS += -DBUILD_LAPIS_TOUCH
+else
+EXTRA_CFLAGS += -DBUILD_KIRBY_TOUCH
 endif
 
 obj-$(CONFIG_TOUCHSCREEN_NT36XXX_SPI) += nvt_36xxx.o
